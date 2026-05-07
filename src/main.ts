@@ -90,13 +90,41 @@ async function bootstrap() {
     },
   });
 
-  // تشغيل الخادم
+  // ============================================
+  // 🔧 التحسينات الخاصة بـ Docker
+  // ============================================
+
+  // تفعيل hooks للإغلاق الآمن
+  app.enableShutdownHooks();
+
+  // معالجة إشارة SIGTERM (ترسلها Docker عند إيقاف الحاوية)
+  process.on('SIGTERM', async () => {
+    logger.log('⚠️ SIGTERM signal received: closing HTTP server...');
+    await app.close();
+    logger.log('✅ HTTP server closed');
+    process.exit(0);
+  });
+
+  // معالجة إشارة SIGINT (Ctrl+C)
+  process.on('SIGINT', async () => {
+    logger.log('⚠️ SIGINT signal received: closing HTTP server...');
+    await app.close();
+    logger.log('✅ HTTP server closed');
+    process.exit(0);
+  });
+
+  // تشغيل الخادم مع الاستماع على جميع الواجهات (مهم لـ Docker)
   const port = configService.get<number>('APP_PORT', 3000);
-  await app.listen(port);
+  await app.listen(port, '0.0.0.0');
+  
+  // ============================================
+  // 📊 سجلات التشغيل
+  // ============================================
   
   logger.log(`🚀 التطبيق يعمل على: http://localhost:${port}`);
   logger.log(`📚 وثائق Swagger: http://localhost:${port}/api/docs`);
   logger.log(`🔗 API Prefix: /${apiPrefix}`);
+  logger.log(`🐳 Docker mode: listening on 0.0.0.0:${port}`);
 }
 
 bootstrap();
