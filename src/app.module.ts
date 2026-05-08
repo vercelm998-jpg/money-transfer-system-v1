@@ -17,14 +17,15 @@ import { AuditModule } from './audit/audit.module';
     }),
 
     TypeOrmModule.forRoot({
-      type: 'postgres',
-      url: 'postgresql://postgres:A0994660508a@db.derxjreentopqdxmplfh.supabase.co:5432/postgres',
-      entities: [__dirname + '/**/*.entity{.ts,.js}'],
-      synchronize: true,
-      ssl: {
-        rejectUnauthorized: false,
-      },
-    }),
+  type: 'postgres',
+  url: process.env.DATABASE_URL,
+  entities: [__dirname + '/**/*.entity{.ts,.js}'],
+  synchronize: true,
+  ssl: { rejectUnauthorized: false },
+  extra: {
+    family: 6,
+  },
+}),
 
     AuthModule,
     UsersModule,
