@@ -1,51 +1,15 @@
-# الاعتمادات والبناء (الأكبر حجماً)
+# .dockerignore
 node_modules
-dist
-build
+npm-debug.log
 .git
-
-# ملفات البيئة والأسرار
-.env
-.env.*
-!.env.example
-
-# ملفات Git والتحكم بالنسخ
-.git/
 .gitignore
-.gitattributes
-
-# محررات الأكواد والملفات المؤقتة
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
-Thumbs.db
-
-# سجلات التشغيل والتقارير
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-lerna-debug.log*
-test-reports/
-
-# أدوات الاختبار والتغطية
+README.md
+.env
+.env.local
+dist
 coverage
-.nyc_output
-.coveralls.yml
-*.test.ts
-*.spec.ts
-
-# ملفات Docker المكررة (تجنب إعادة استخدامها عن طريق الخطأ)
-Dockerfile
-.dockerignore
-
-# أدوات أخرى
-.github/
-.husky/
-.prettierrc*
-.eslintrc*
-.commitlintrc*
+.vscode
+.idea
+*.md
+logs
+tmp

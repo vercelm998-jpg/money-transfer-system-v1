@@ -1,0 +1,73 @@
+# docker-compose.dev.yml
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: money-transfer-mysql-dev
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: money_transfer_db
+      MYSQL_USER: nestjs
+      MYSQL_PASSWORD: root123
+      TZ: Asia/Riyadh
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_dev_data:/var/lib/mysql
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot123"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: money-transfer-app-dev
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USERNAME: nestjs
+      DB_PASSWORD: root123
+      DB_DATABASE: money_transfer_db
+      JWT_SECRET: devSecretKey123
+      APP_PORT: 3000
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - app-network
+    command: npm run start:dev
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: money-transfer-phpmyadmin-dev
+    restart: unless-stopped
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+    ports:
+      - "8080:80"
+    depends_on:
+      - mysql
+    networks:
+      - app-network
+
+volumes:
+  mysql_dev_data:
+
+networks:
+  app-network:
+    driver: bridge

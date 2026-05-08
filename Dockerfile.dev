@@ -1,0 +1,22 @@
+# Dockerfile.dev
+FROM node:20-alpine
+
+WORKDIR /app
+
+# تثبيت الأدوات اللازمة
+RUN apk add --no-cache python3 make g++ tzdata
+
+ENV TZ=Asia/Riyadh
+
+# نسخ ملفات package.json
+COPY package*.json ./
+
+# تثبيت جميع الاعتماديات (بما فيها devDependencies)
+RUN npm install
+
+# نسخ باقي الملفات
+COPY . .
+
+EXPOSE 3000
+
+CMD ["npm", "run", "start:dev"]

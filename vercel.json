@@ -1,0 +1,25 @@
+{
+  "version": 2,
+  "name": "money-transfer-api",
+  "builds": [
+    {
+      "src": "src/main.ts",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "src/main.ts"
+    }
+  ],
+  "env": {
+    "DB_HOST": "money-transfer-db-vercelm998-ae36.k.aivencloud.com",
+    "DB_PORT": "11361",
+    "DB_USERNAME": "avnadmin",
+    "DB_DATABASE": "defaultdb",
+    "DB_SSL": "true",
+    "JWT_SECRET": "mySuperSecretKey123456",
+    "JWT_EXPIRATION": "24h"
+  }
+}
