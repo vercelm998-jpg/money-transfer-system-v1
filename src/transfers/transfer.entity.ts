@@ -71,9 +71,8 @@ export class Transfer {
   isDelivered: boolean;
 
   // 🆕 تاريخ تأكيد التسليم
-  @Column({ type: 'datetime', nullable: true })
-  deliveredAt: Date;
-
+  @Column({ type: 'timestamp', nullable: true })
+deliveredAt: Date;
   // 🆕 ملاحظة من المستلم عند الاستلام
   @Column({ type: 'text', nullable: true })
   deliveryNote: string;
