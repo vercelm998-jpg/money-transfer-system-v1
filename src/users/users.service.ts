@@ -188,6 +188,41 @@ export class UsersService {
     return updatedUser;
   }
 
+  // 🆕 قائمة عامة - ترجع معلومات أساسية فقط
+async findAllPublic(query: any = {}): Promise<any> {
+  const { 
+    page = 1, 
+    limit = 100, 
+    search 
+  } = query;
+
+  const queryBuilder = this.usersRepository
+    .createQueryBuilder('user')
+    .select([
+      'user.id',
+      'user.username',
+      'user.email',
+      'user.status',
+    ])
+    .where('user.status = :status', { status: UserStatus.ACTIVE });
+
+  if (search) {
+    queryBuilder.andWhere(
+      '(user.username LIKE :search OR user.email LIKE :search OR user.id LIKE :search)',
+      { search: `%${search}%` }
+    );
+  }
+
+  queryBuilder
+    .orderBy('user.username', 'ASC')
+    .skip((page - 1) * limit)
+    .take(limit);
+
+  const [users, total] = await queryBuilder.getManyAndCount();
+
+  return { users, total };
+}
+
   async updateStatus(userId: number, status: UserStatus, adminId: number): Promise<User> {
     const user = await this.findById(userId);
     

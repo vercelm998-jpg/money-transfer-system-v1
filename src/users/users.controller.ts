@@ -12,7 +12,6 @@ import {
   HttpStatus
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
-
 import { AuthGuard } from '@nestjs/passport';
 import { RolesGuard } from '../auth/roles.guard';
 import { UsersService } from './users.service';
@@ -25,6 +24,15 @@ import { UserStatus } from './user.entity';
 @Controller('users')
 export class UsersController {
   constructor(private usersService: UsersService) {}
+
+  // 🆕 قائمة عامة - أي مستخدم مسجل يمكنه الوصول
+  @Get('public-list')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'قائمة المستخدمين العامة (للجميع)' })
+  async getPublicList(@Query() query: any) {
+    return this.usersService.findAllPublic(query);
+  }
 
   @Get('profile')
   @UseGuards(AuthGuard('jwt'))
