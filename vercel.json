@@ -3,14 +3,14 @@
   "name": "money-transfer-api",
   "builds": [
     {
-      "src": "src/main.ts",
+      "src": "dist/main.js",
       "use": "@vercel/node"
     }
   ],
   "routes": [
     {
       "src": "/(.*)",
-      "dest": "src/main.ts"
+      "dest": "dist/main.js"
     }
   ],
   "env": {
@@ -19,7 +19,6 @@
     "DB_USERNAME": "avnadmin",
     "DB_DATABASE": "defaultdb",
     "DB_SSL": "true",
-    "JWT_SECRET": "mySuperSecretKey123456",
-    "JWT_EXPIRATION": "24h"
+    "JWT_SECRET": "mySuperSecretKey123456"
   }
 }
