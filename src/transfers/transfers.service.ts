@@ -78,24 +78,26 @@ export class TransfersService {
       if (receiver.status !== UserStatus.ACTIVE) {
         throw new BadRequestException('حساب المستلم غير نشط');
       }
-
       // 🆕 حساب العمولة - مبلغ ثابت من المستخدم أو نسبة افتراضية
       let commission: number;
       let commissionRate: number;
       let customCommission = false;
 
-      if (commissionAmount !== undefined && commissionAmount !== null && commissionAmount > 0) {
-        // المستخدم أدخل مبلغ العمولة مباشرة
-        commission = Number(commissionAmount);
-        commissionRate = Number(sender.commissionRate) || 0.01;
+      if (createTransferDto.commissionAmount !== undefined && createTransferDto.commissionAmount !== null) {
+        // المستخدم أدخل مبلغ العمولة (حتى لو 0)
+        commission = Number(createTransferDto.commissionAmount);
+        commissionRate = amount > 0 ? commission / amount : 0;
         customCommission = true;
       } else {
-        // استخدام النسبة الافتراضية
+        // استخدام النسبة الافتراضية من حساب المرسل
         commissionRate = Number(sender.commissionRate) || 0.01;
         commission = Number((amount * commissionRate).toFixed(2));
       }
 
       const totalAmount = Number((amount + commission).toFixed(2));
+
+      // ✅ الآن: إرسال 500 + عمولة 0 = المجموع 500
+      // ✅ وإذا لم يحدد العمولة: 500 + 1% = 505
 
       // التحقق من الرصيد
       const senderBalance = Number(sender.points);
