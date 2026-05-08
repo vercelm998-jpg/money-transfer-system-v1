@@ -6,7 +6,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, In } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { Transfer, TransferStatus, TransferType } from './transfer.entity';
 import { User, UserStatus } from '../users/user.entity';
 import { CreateTransferDto } from './dto/create-transfer.dto';
@@ -34,7 +34,7 @@ export class TransfersService {
     createTransferDto: CreateTransferDto,
     metadata?: any
   ): Promise<any> {
-    const { receiverId, amount, note } = createTransferDto;
+    const { receiverId, amount, note, commissionAmount, currency } = createTransferDto;
 
     // التحقق من المدخلات الأساسية
     if (senderId === receiverId) {
@@ -45,16 +45,14 @@ export class TransfersService {
       throw new BadRequestException('المبلغ يجب أن يكون أكبر من صفر');
     }
 
-    // بدء المعاملة مع timeout قصير
+    // بدء المعاملة
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     
     try {
-      // تعيين timeout للمعاملة
-      await queryRunner.query('SET innodb_lock_wait_timeout = 5');
       await queryRunner.startTransaction();
 
-      // جلب المستخدمين مع قفل للتحديث - بدون pessimistic_write لتجنب deadlock
+      // جلب المستخدمين
       const sender = await queryRunner.manager.findOne(User, {
         where: { id: senderId }
       });
@@ -77,19 +75,34 @@ export class TransfersService {
         throw new ForbiddenException('حسابك غير نشط. يرجى التواصل مع الدعم');
       }
 
-      if (receiver.status !== UserStatus.ACTIVE && receiver.status !== 'active' as any) {
+      if (receiver.status !== UserStatus.ACTIVE) {
         throw new BadRequestException('حساب المستلم غير نشط');
       }
 
-      // حساب العمولة
-      const commissionRate = Number(sender.commissionRate) || 0.01;
-      const commission = Number((amount * commissionRate).toFixed(2));
+      // 🆕 حساب العمولة - مبلغ ثابت من المستخدم أو نسبة افتراضية
+      let commission: number;
+      let commissionRate: number;
+      let customCommission = false;
+
+      if (commissionAmount !== undefined && commissionAmount !== null && commissionAmount > 0) {
+        // المستخدم أدخل مبلغ العمولة مباشرة
+        commission = Number(commissionAmount);
+        commissionRate = Number(sender.commissionRate) || 0.01;
+        customCommission = true;
+      } else {
+        // استخدام النسبة الافتراضية
+        commissionRate = Number(sender.commissionRate) || 0.01;
+        commission = Number((amount * commissionRate).toFixed(2));
+      }
+
       const totalAmount = Number((amount + commission).toFixed(2));
 
       // التحقق من الرصيد
       const senderBalance = Number(sender.points);
       if (senderBalance < totalAmount) {
-        throw new BadRequestException(`رصيدك غير كافي. الرصيد المتاح: ${senderBalance.toFixed(2)}`);
+        throw new BadRequestException(
+          `رصيدك غير كافي. الرصيد المتاح: ${senderBalance.toFixed(2)}`
+        );
       }
 
       // التحقق من الحدود
@@ -98,7 +111,10 @@ export class TransfersService {
         throw new BadRequestException(transferCheck.reason);
       }
 
-      // تحديث الأرصدة مباشرة بدون حفظ الكيان كاملاً
+      // 🆕 العملة المختارة
+      const selectedCurrency = currency || 'USD';
+
+      // تحديث الأرصدة
       await queryRunner.manager.update(User, senderId, {
         points: Number((senderBalance - totalAmount).toFixed(2)),
         dailyTransferred: Number((Number(sender.dailyTransferred || 0) + amount).toFixed(2)),
@@ -123,46 +139,55 @@ export class TransfersService {
       transfer.type = TransferType.INTERNAL;
       transfer.status = TransferStatus.COMPLETED;
       transfer.completedAt = new Date();
-      transfer.metadata = { ...metadata, commissionRate };
-      
-      // توليد رقم مرجعي يدوياً
+      transfer.metadata = {
+        ...metadata,
+        commissionRate,
+        customCommission,
+        currency: selectedCurrency,
+      };
+
+      // توليد رقم مرجعي
       const timestamp = Date.now().toString(36);
       const random = Math.random().toString(36).substring(2, 8).toUpperCase();
       transfer.referenceNumber = `TRF-${timestamp}-${random}`;
 
       const savedTransfer = await queryRunner.manager.save(transfer);
 
-      // تحديث الرصيد بعد الحفظ للتأكيد
-      const updatedSender = await queryRunner.manager.findOne(User, { 
+      // جلب الرصيد المحدث للمرسل
+      const updatedSender = await queryRunner.manager.findOne(User, {
         where: { id: senderId },
         select: ['id', 'username', 'points']
       });
 
       // تسجيل في المحفظة
-      await this.walletService.recordTransaction(
-        senderId,
-        -totalAmount,
-        'transfer_out',
-        `تحويل ${amount} إلى ${receiver.username}`,
-        savedTransfer.id,
-        queryRunner
-      );
+      try {
+        await this.walletService.recordTransaction(
+          senderId,
+          -totalAmount,
+          'transfer_out',
+          `تحويل ${amount} ${selectedCurrency} إلى ${receiver.username}`,
+          savedTransfer.id,
+          queryRunner
+        );
 
-      await this.walletService.recordTransaction(
-        receiverId,
-        amount,
-        'transfer_in',
-        `استلام ${amount} من ${sender.username}`,
-        savedTransfer.id,
-        queryRunner
-      );
+        await this.walletService.recordTransaction(
+          receiverId,
+          amount,
+          'transfer_in',
+          `استلام ${amount} ${selectedCurrency} من ${sender.username}`,
+          savedTransfer.id,
+          queryRunner
+        );
+      } catch (walletError) {
+        this.logger.warn('فشل تسجيل المحفظة: ' + walletError.message);
+      }
 
       // إرسال الإشعارات
       try {
         await this.notificationsService.createNotification({
           userId: receiverId,
           title: '💰 تحويل جديد',
-          message: `تم استلام ${amount.toFixed(2)} نقطة من ${sender.username}`,
+          message: `تم استلام ${amount.toFixed(2)} ${selectedCurrency} من ${sender.username}`,
           type: 'transfer_received',
           transferId: savedTransfer.id,
         });
@@ -170,7 +195,7 @@ export class TransfersService {
         await this.notificationsService.createNotification({
           userId: senderId,
           title: '✅ تم التحويل بنجاح',
-          message: `تم تحويل ${amount.toFixed(2)} نقطة إلى ${receiver.username} (العمولة: ${commission.toFixed(2)})`,
+          message: `تم تحويل ${amount.toFixed(2)} ${selectedCurrency} إلى ${receiver.username} (العمولة: ${commission.toFixed(2)})`,
           type: 'transfer_sent',
           transferId: savedTransfer.id,
         });
@@ -183,8 +208,13 @@ export class TransfersService {
         await this.auditService.logAction(
           senderId,
           'TRANSFER_COMPLETED',
-          `تحويل ${amount} إلى ${receiver.username} (رسوم: ${commission})`,
-          { transferId: savedTransfer.id, referenceNumber: savedTransfer.referenceNumber }
+          `تحويل ${amount} ${selectedCurrency} إلى ${receiver.username} (عمولة: ${commission})`,
+          {
+            transferId: savedTransfer.id,
+            referenceNumber: savedTransfer.referenceNumber,
+            currency: selectedCurrency,
+            commissionType: customCommission ? 'custom' : 'default',
+          }
         );
       } catch (auditError) {
         this.logger.warn('فشل تسجيل التدقيق: ' + auditError.message);
@@ -192,7 +222,9 @@ export class TransfersService {
 
       await queryRunner.commitTransaction();
 
-      this.logger.log(`✅ تحويل ناجح: ${amount} من ${sender.username} إلى ${receiver.username} - REF: ${savedTransfer.referenceNumber}`);
+      this.logger.log(
+        `✅ تحويل ناجح: ${amount} ${selectedCurrency} من ${sender.username} إلى ${receiver.username} - REF: ${savedTransfer.referenceNumber}`
+      );
 
       return {
         success: true,
@@ -203,6 +235,7 @@ export class TransfersService {
           amount: savedTransfer.amount,
           commission: savedTransfer.commission,
           totalAmount: savedTransfer.totalAmount,
+          currency: selectedCurrency,
           sender: {
             id: sender.id,
             username: sender.username,
@@ -318,157 +351,89 @@ export class TransfersService {
       }
     };
   }
-  // ... (باقي الكود كما هو)
 
-// 🆕 تأكيد استلام التحويل (للمستلم فقط - مرة واحدة)
-async confirmDelivery(transferId: number, userId: number, deliveryNote?: string): Promise<any> {
-  const transfer = await this.transfersRepository.findOne({
-    where: { id: transferId },
-    relations: ['sender', 'receiver']
-  });
-
-  if (!transfer) {
-    throw new NotFoundException('التحويل غير موجود');
-  }
-
-  // التحقق أن المستخدم هو المستلم
-  if (transfer.receiverId !== userId) {
-    throw new ForbiddenException('فقط المستلم يمكنه تأكيد الاستلام');
-  }
-
-  // التحقق أن التحويل مكتمل
-  if (transfer.status !== TransferStatus.COMPLETED) {
-    throw new BadRequestException('لا يمكن تأكيد استلام تحويل غير مكتمل');
-  }
-
-  // التحقق أنه لم يتم التأكيد مسبقاً
-  if (transfer.isDelivered) {
-    throw new BadRequestException('تم تأكيد استلام هذا التحويل مسبقاً');
-  }
-
-  // تحديث حالة التسليم
-  transfer.isDelivered = true;
-  transfer.deliveredAt = new Date();
-  transfer.deliveryNote = deliveryNote || null;
-  transfer.status = TransferStatus.DELIVERED;
-  transfer.updatedAt = new Date();
-
-  await this.transfersRepository.save(transfer);
-
-  // إرسال إشعار للمرسل بأن المستلم أكد الاستلام
-  try {
-    await this.notificationsService.createNotification({
-      userId: transfer.senderId,
-      title: '✅ تم تأكيد الاستلام',
-      message: `تم تأكيد استلام ${transfer.receiver.username} لمبلغ ${transfer.amount}`,
-      type: 'transfer_delivered',
-      transferId: transfer.id,
+  // 🆕 تأكيد استلام التحويل
+  async confirmDelivery(transferId: number, userId: number, deliveryNote?: string): Promise<any> {
+    const transfer = await this.transfersRepository.findOne({
+      where: { id: transferId },
+      relations: ['sender', 'receiver']
     });
-  } catch (error) {
-    this.logger.warn('فشل إرسال إشعار تأكيد الاستلام');
+
+    if (!transfer) {
+      throw new NotFoundException('التحويل غير موجود');
+    }
+
+    if (transfer.receiverId !== userId) {
+      throw new ForbiddenException('فقط المستلم يمكنه تأكيد الاستلام');
+    }
+
+    if (transfer.status !== TransferStatus.COMPLETED) {
+      throw new BadRequestException('لا يمكن تأكيد استلام تحويل غير مكتمل');
+    }
+
+    if (transfer.isDelivered) {
+      throw new BadRequestException('تم تأكيد استلام هذا التحويل مسبقاً');
+    }
+
+    transfer.isDelivered = true;
+    transfer.deliveredAt = new Date();
+    transfer.deliveryNote = deliveryNote || null;
+    transfer.status = TransferStatus.DELIVERED;
+
+    await this.transfersRepository.save(transfer);
+
+    try {
+      await this.notificationsService.createNotification({
+        userId: transfer.senderId,
+        title: '✅ تم تأكيد الاستلام',
+        message: `تم تأكيد استلام ${transfer.receiver.username} لمبلغ ${transfer.amount}`,
+        type: 'transfer_delivered',
+        transferId: transfer.id,
+      });
+    } catch (error) {
+      this.logger.warn('فشل إرسال إشعار تأكيد الاستلام');
+    }
+
+    return {
+      success: true,
+      message: 'تم تأكيد استلام التحويل بنجاح',
+      transfer: {
+        id: transfer.id,
+        referenceNumber: transfer.referenceNumber,
+        amount: transfer.amount,
+        isDelivered: transfer.isDelivered,
+        deliveredAt: transfer.deliveredAt,
+        deliveryNote: transfer.deliveryNote,
+        status: transfer.status,
+      }
+    };
   }
 
-  this.logger.log(`✅ تم تأكيد استلام التحويل ${transfer.referenceNumber} من قبل ${transfer.receiver.username}`);
+  // 🆕 التحويلات التي لم يتم تأكيد استلامها
+  async getPendingDeliveryTransfers(userId: number): Promise<any> {
+    const transfers = await this.transfersRepository.find({
+      where: [
+        { receiverId: userId, isDelivered: false, status: TransferStatus.COMPLETED },
+        { senderId: userId, isDelivered: false, status: TransferStatus.COMPLETED }
+      ],
+      relations: ['sender', 'receiver'],
+      order: { createdAt: 'DESC' }
+    });
 
-  return {
-    success: true,
-    message: 'تم تأكيد استلام التحويل بنجاح',
-    transfer: {
-      id: transfer.id,
-      referenceNumber: transfer.referenceNumber,
-      amount: transfer.amount,
-      isDelivered: transfer.isDelivered,
-      deliveredAt: transfer.deliveredAt,
-      deliveryNote: transfer.deliveryNote,
-      status: transfer.status,
-      sender: {
-        id: transfer.sender.id,
-        username: transfer.sender.username
-      },
-      receiver: {
-        id: transfer.receiver.id,
-        username: transfer.receiver.username
+    const receivedPending = transfers.filter(t => t.receiverId === userId);
+    const sentPending = transfers.filter(t => t.senderId === userId);
+
+    return {
+      receivedPending,
+      sentPending,
+      summary: {
+        totalReceivedPending: receivedPending.length,
+        totalSentPending: sentPending.length,
+        totalAmountReceivedPending: receivedPending.reduce((sum, t) => sum + Number(t.amount), 0),
+        totalAmountSentPending: sentPending.reduce((sum, t) => sum + Number(t.amount), 0)
       }
-    }
-  };
-}
-
-// 🆕 الحصول على التحويلات التي لم يتم تأكيد استلامها بعد
-async getPendingDeliveryTransfers(userId: number): Promise<any> {
-  const transfers = await this.transfersRepository.find({
-    where: [
-      { receiverId: userId, isDelivered: false, status: TransferStatus.COMPLETED },
-      { senderId: userId, isDelivered: false, status: TransferStatus.COMPLETED }
-    ],
-    relations: ['sender', 'receiver'],
-    order: { createdAt: 'DESC' }
-  });
-
-  const receivedPending = transfers.filter(t => t.receiverId === userId);
-  const sentPending = transfers.filter(t => t.senderId === userId);
-
-  return {
-    receivedPending: receivedPending.map(t => ({
-      id: t.id,
-      referenceNumber: t.referenceNumber,
-      amount: t.amount,
-      from: t.sender.username,
-      createdAt: t.createdAt,
-      status: t.status
-    })),
-    sentPending: sentPending.map(t => ({
-      id: t.id,
-      referenceNumber: t.referenceNumber,
-      amount: t.amount,
-      to: t.receiver.username,
-      createdAt: t.createdAt,
-      status: t.status
-    })),
-    summary: {
-      totalReceivedPending: receivedPending.length,
-      totalSentPending: sentPending.length,
-      totalAmountReceivedPending: receivedPending.reduce((sum, t) => sum + Number(t.amount), 0),
-      totalAmountSentPending: sentPending.reduce((sum, t) => sum + Number(t.amount), 0)
-    }
-  };
-}
-
-// 🆕 الحصول على إحصائيات التسليم
-async getDeliveryStats(userId: number): Promise<any> {
-  // التحويلات المستلمة مع حالة التسليم
-  const receivedTransfers = await this.transfersRepository.find({
-    where: { receiverId: userId, status: In([TransferStatus.COMPLETED, TransferStatus.DELIVERED]) },
-  });
-
-  // التحويلات المرسلة مع حالة التسليم
-  const sentTransfers = await this.transfersRepository.find({
-    where: { senderId: userId, status: In([TransferStatus.COMPLETED, TransferStatus.DELIVERED]) },
-  });
-
-  const receivedDelivered = receivedTransfers.filter(t => t.isDelivered);
-  const sentDelivered = sentTransfers.filter(t => t.isDelivered);
-
-  return {
-    received: {
-      total: receivedTransfers.length,
-      delivered: receivedDelivered.length,
-      pending: receivedTransfers.length - receivedDelivered.length,
-      deliveryRate: receivedTransfers.length > 0 
-        ? ((receivedDelivered.length / receivedTransfers.length) * 100).toFixed(2) + '%' 
-        : '0%'
-    },
-    sent: {
-      total: sentTransfers.length,
-      delivered: sentDelivered.length,
-      pending: sentTransfers.length - sentDelivered.length,
-      deliveryRate: sentTransfers.length > 0 
-        ? ((sentDelivered.length / sentTransfers.length) * 100).toFixed(2) + '%' 
-        : '0%'
-    }
-  };
-}
-
-// ... (باقي الكود كما هو)
+    };
+  }
 
   async cancelTransfer(transferId: number, userId: number, role: string): Promise<any> {
     const transfer = await this.transfersRepository.findOne({
@@ -492,7 +457,6 @@ async getDeliveryStats(userId: number): Promise<any> {
     await queryRunner.connect();
     
     try {
-      await queryRunner.query('SET innodb_lock_wait_timeout = 5');
       await queryRunner.startTransaction();
 
       await queryRunner.manager.update(User, transfer.sender.id, {
@@ -510,10 +474,7 @@ async getDeliveryStats(userId: number): Promise<any> {
 
       await queryRunner.commitTransaction();
 
-      return {
-        success: true,
-        message: 'تم إلغاء التحويل وإرجاع المبلغ'
-      };
+      return { success: true, message: 'تم إلغاء التحويل وإرجاع المبلغ' };
     } catch (error) {
       await queryRunner.rollbackTransaction();
       throw error;
