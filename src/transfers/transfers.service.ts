@@ -6,7 +6,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, In } from 'typeorm';  // ← تأكد من وجود In هنا
 import { Transfer, TransferStatus, TransferType } from './transfer.entity';
 import { User, UserStatus } from '../users/user.entity';
 import { CreateTransferDto } from './dto/create-transfer.dto';
@@ -434,6 +434,23 @@ export class TransfersService {
       }
     };
   }
+
+  async getDeliveryStats(userId: number): Promise<any> {
+  const transfers = await this.transfersRepository.find({
+    where: [
+      { receiverId: userId, status: In([TransferStatus.COMPLETED, TransferStatus.DELIVERED]) },
+      { senderId: userId, status: In([TransferStatus.COMPLETED, TransferStatus.DELIVERED]) }
+    ]
+  });
+
+  const receivedDelivered = transfers.filter(t => t.receiverId === userId && t.isDelivered);
+  const sentDelivered = transfers.filter(t => t.senderId === userId && t.isDelivered);
+
+  return {
+    received: { total: transfers.filter(t => t.receiverId === userId).length, delivered: receivedDelivered.length },
+    sent: { total: transfers.filter(t => t.senderId === userId).length, delivered: sentDelivered.length }
+  };
+}
 
   async cancelTransfer(transferId: number, userId: number, role: string): Promise<any> {
     const transfer = await this.transfersRepository.findOne({

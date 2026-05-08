@@ -273,7 +273,7 @@ export class SchedulingService {
           receiverId: schedule.receiverId,
           amount: schedule.amount,
           note: schedule.note || 'تحويل مجدول تلقائي',
-          type: 'scheduled'
+          
         },
         { scheduledTransferId: schedule.id }
       );
