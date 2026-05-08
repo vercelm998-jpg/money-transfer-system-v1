@@ -59,10 +59,10 @@ export class ScheduledTransfer {
   @Column({ type: 'enum', enum: ScheduleFrequency })
   frequency: ScheduleFrequency;
 
-  @Column({ type: 'datetime' })
+  @Column({ type: 'timestamp' })
   nextExecution: Date;
 
-  @Column({ type: 'datetime', nullable: true })
+  @Column({ type: 'timestamp', nullable: true })
   lastExecution: Date;
 
   @Column({ type: 'enum', enum: ScheduleStatus, default: ScheduleStatus.ACTIVE })
