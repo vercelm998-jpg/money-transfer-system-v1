@@ -52,6 +52,14 @@ export class User {
   @Exclude()
   password: string;
 
+  // 🆕 الجهة (مؤسسة - فرد - جهة حكومية...)
+  @Column({ nullable: true, length: 100 })
+  organization: string;
+
+  // 🆕 العنوان الكامل
+  @Column({ nullable: true, length: 200 })
+  address: string;
+
   @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
   points: number;
 
@@ -82,7 +90,7 @@ export class User {
   @Column({ default: 0 })
   totalTransfers: number;
 
-  @Column({ type: 'decimal', precision: 5, scale: 3, default: 0.01 })
+  @Column({ type: 'decimal', precision: 5, scale: 3, default: 0.00 })
   commissionRate: number;
 
   @Column({ nullable: true })
@@ -170,14 +178,12 @@ export class User {
     if (this.lastTransferAt) {
       const lastTransfer = new Date(this.lastTransferAt);
       
-      // إعادة تعيين الحد اليومي
       if (lastTransfer.getDate() !== now.getDate() ||
           lastTransfer.getMonth() !== now.getMonth() ||
           lastTransfer.getFullYear() !== now.getFullYear()) {
         this.dailyTransferred = 0;
       }
       
-      // إعادة تعيين الحد الشهري
       if (lastTransfer.getMonth() !== now.getMonth() ||
           lastTransfer.getFullYear() !== now.getFullYear()) {
         this.monthlyTransferred = 0;

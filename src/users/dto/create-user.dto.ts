@@ -7,7 +7,7 @@ import {
   IsEnum,
   IsNumber,
   Min,
-  Max
+  MaxLength  // ✅ أضف هذا
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { UserRole, KYCLevel } from '../user.entity';
@@ -49,6 +49,24 @@ export class CreateUserDto {
   @IsOptional()
   @IsEnum(UserRole)
   role?: UserRole;
+
+  @ApiPropertyOptional({ 
+    description: 'الجهة',
+    example: 'شركة الأمل'
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  organization?: string;
+
+  @ApiPropertyOptional({ 
+    description: 'العنوان',
+    example: 'دمشق - شارع الحمراء'
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  address?: string;
 
   @ApiPropertyOptional({ 
     description: 'مستوى KYC',
