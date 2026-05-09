@@ -106,7 +106,10 @@ export class TransfersService {
       transfer.status = TransferStatus.COMPLETED;
       transfer.completedAt = new Date();
       transfer.metadata = { ...metadata, currency: currency || 'USD' };
+  
 
+// 🆕 اسم المستفيد - إذا أرسله المستخدم أو استخدم اسم المستلم
+transfer.beneficiaryName = createTransferDto.beneficiaryName || receiver.username;
       const timestamp = Date.now().toString(36);
       const random = Math.random().toString(36).substring(2, 8).toUpperCase();
       transfer.referenceNumber = `TRF-${timestamp}-${random}`;
