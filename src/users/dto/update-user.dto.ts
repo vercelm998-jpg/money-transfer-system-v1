@@ -6,7 +6,7 @@ import {
   IsNumber,
   IsBoolean,
   Min,
-  IsObject, 
+  IsObject,
   MaxLength
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
@@ -33,8 +33,6 @@ export class UpdateUserDto {
   @IsEnum(UserStatus)
   status?: UserStatus;
 
-  
-
   @ApiPropertyOptional({ description: 'الجهة (مؤسسة - فرد...)', example: 'شركة الأمل' })
   @IsOptional()
   @IsString()
@@ -46,7 +44,6 @@ export class UpdateUserDto {
   @IsString()
   @MaxLength(200)
   address?: string;
-}
 
   @ApiPropertyOptional({ description: 'مستوى KYC', enum: KYCLevel })
   @IsOptional()
