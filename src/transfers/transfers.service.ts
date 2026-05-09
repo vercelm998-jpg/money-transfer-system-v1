@@ -39,7 +39,6 @@ export class TransfersService {
     if (senderId === receiverId) {
       throw new BadRequestException('لا يمكنك التحويل إلى نفسك');
     }
-
     if (!amount || amount <= 0) {
       throw new BadRequestException('المبلغ يجب أن يكون أكبر من صفر');
     }
@@ -58,46 +57,33 @@ export class TransfersService {
       if (sender.status !== UserStatus.ACTIVE) throw new ForbiddenException('حسابك غير نشط');
       if (receiver.status !== UserStatus.ACTIVE) throw new BadRequestException('حساب المستلم غير نشط');
 
-      // 🆕 حساب العمولة - FIXED
+      // ✅ حساب العمولة
       let commission: number;
-      let commissionRate: number;
-      let customCommission = false;
-
+      
+      this.logger.log(`🔍 commissionAmount: ${commissionAmount} (type: ${typeof commissionAmount})`);
+      
       if (commissionAmount !== undefined && commissionAmount !== null) {
-        // المستخدم حدد العمولة يدوياً (حتى لو 0)
         commission = Number(commissionAmount);
-        commissionRate = amount > 0 ? commission / amount : 0;
-        customCommission = true;
+        this.logger.log(`✅ Custom commission: ${commission}`);
       } else {
-        // النسبة الافتراضية
-        commissionRate = Number(sender.commissionRate) || 0.01;
-        commission = Number((amount * commissionRate).toFixed(2));
+        const rate = Number(sender.commissionRate) || 0.01;
+        commission = Number((amount * rate).toFixed(2));
+        this.logger.log(`✅ Default commission (${rate * 100}%): ${commission}`);
       }
 
       const totalAmount = Number((amount + commission).toFixed(2));
 
-      // ✅ DEBUG LOGS
-      this.logger.log(`💰 SENDER: ${sender.username} | Balance BEFORE: ${sender.points} | Amount: ${amount} | Commission: ${commission} | Total: ${totalAmount}`);
-      this.logger.log(`💰 RECEIVER: ${receiver.username} | Balance BEFORE: ${receiver.points}`);
+      this.logger.log(`💰 Amount=${amount} | Commission=${commission} | Total=${totalAmount}`);
 
       // التحقق من الرصيد
       const senderBalance = Number(sender.points);
       if (senderBalance < totalAmount) {
-        throw new BadRequestException(`رصيدك غير كافي. الرصيد المتاح: ${senderBalance.toFixed(2)}`);
+        throw new BadRequestException(`رصيدك غير كافي. الرصيد: ${senderBalance.toFixed(2)}`);
       }
 
-      // التحقق من الحدود
-      const transferCheck = sender.canTransfer(totalAmount);
-      if (!transferCheck.can) {
-        throw new BadRequestException(transferCheck.reason);
-      }
-
-      const selectedCurrency = currency || 'USD';
-
-      // ✅ تحديث الأرصدة - مرة واحدة فقط
+      // ✅ تحديث رصيد المرسل
       const newSenderBalance = Number((senderBalance - totalAmount).toFixed(2));
-      const newReceiverBalance = Number((Number(receiver.points) + amount).toFixed(2));
-
+      
       await queryRunner.manager.update(User, senderId, {
         points: newSenderBalance,
         dailyTransferred: Number((Number(sender.dailyTransferred || 0) + amount).toFixed(2)),
@@ -106,12 +92,19 @@ export class TransfersService {
         lastTransferAt: new Date(),
       });
 
+      // ✅ جلب رصيد المستلم الحقيقي من DB ثم تحديثه
+      const currentReceiver = await queryRunner.manager.findOne(User, {
+        where: { id: receiverId },
+        select: ['id', 'points'],
+      });
+      const newReceiverBalance = Number((Number(currentReceiver.points) + amount).toFixed(2));
+      
       await queryRunner.manager.update(User, receiverId, {
         points: newReceiverBalance,
       });
 
-      this.logger.log(`✅ SENDER: ${sender.username} | Balance AFTER: ${newSenderBalance}`);
-      this.logger.log(`✅ RECEIVER: ${receiver.username} | Balance AFTER: ${newReceiverBalance}`);
+      this.logger.log(`✅ SENDER: ${sender.username} | ${senderBalance} → ${newSenderBalance}`);
+      this.logger.log(`✅ RECEIVER: ${receiver.username} | ${currentReceiver.points} → ${newReceiverBalance}`);
 
       // إنشاء سجل التحويل
       const transfer = new Transfer();
@@ -125,7 +118,7 @@ export class TransfersService {
       transfer.type = TransferType.INTERNAL;
       transfer.status = TransferStatus.COMPLETED;
       transfer.completedAt = new Date();
-      transfer.metadata = { ...metadata, commissionRate, customCommission, currency: selectedCurrency };
+      transfer.metadata = { ...metadata, currency: currency || 'USD' };
 
       const timestamp = Date.now().toString(36);
       const random = Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -137,16 +130,12 @@ export class TransfersService {
       try {
         await this.walletService.recordTransaction(senderId, -totalAmount, 'transfer_out', `تحويل ${amount} إلى ${receiver.username}`, savedTransfer.id, queryRunner);
         await this.walletService.recordTransaction(receiverId, amount, 'transfer_in', `استلام ${amount} من ${sender.username}`, savedTransfer.id, queryRunner);
-      } catch (e) { this.logger.warn('Wallet error: ' + e.message); }
+      } catch (e) { this.logger.warn('Wallet: ' + e.message); }
 
       try {
         await this.notificationsService.createNotification({ userId: receiverId, title: '💰 تحويل جديد', message: `تم استلام ${amount} من ${sender.username}`, type: 'transfer_received', transferId: savedTransfer.id });
         await this.notificationsService.createNotification({ userId: senderId, title: '✅ تم التحويل', message: `تم تحويل ${amount} إلى ${receiver.username}`, type: 'transfer_sent', transferId: savedTransfer.id });
-      } catch (e) { this.logger.warn('Notification error: ' + e.message); }
-
-      try {
-        await this.auditService.logAction(senderId, 'TRANSFER_COMPLETED', `تحويل ${amount} إلى ${receiver.username}`, { transferId: savedTransfer.id, referenceNumber: savedTransfer.referenceNumber });
-      } catch (e) { this.logger.warn('Audit error: ' + e.message); }
+      } catch (e) { this.logger.warn('Notif: ' + e.message); }
 
       await queryRunner.commitTransaction();
 
@@ -159,17 +148,15 @@ export class TransfersService {
           amount: savedTransfer.amount,
           commission: savedTransfer.commission,
           totalAmount: savedTransfer.totalAmount,
-          currency: selectedCurrency,
           sender: { id: sender.id, username: sender.username, newBalance: newSenderBalance },
           receiver: { id: receiver.id, username: receiver.username },
           note: savedTransfer.note,
           status: savedTransfer.status,
           createdAt: savedTransfer.createdAt,
-          completedAt: savedTransfer.completedAt,
         },
       };
     } catch (error) {
-      this.logger.error(`❌ فشل التحويل: ${error.message}`);
+      this.logger.error(`❌ فشل: ${error.message}`);
       try { await queryRunner.rollbackTransaction(); } catch (e) {}
       throw error;
     } finally {
