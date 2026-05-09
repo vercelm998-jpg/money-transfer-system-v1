@@ -50,6 +50,18 @@ export class CreateUserDto {
   @IsEnum(UserRole)
   role?: UserRole;
 
+  @ApiPropertyOptional({ description: 'الجهة', example: 'شركة الأمل' })
+  @IsOptional()
+@IsString()
+@MaxLength(100)
+organization?: string;
+
+@ApiPropertyOptional({ description: 'العنوان', example: 'دمشق - شارع الحمراء' })
+@IsOptional()
+@IsString()
+@MaxLength(200)
+address?: string;
+  
   @ApiPropertyOptional({ 
     description: 'مستوى KYC',
     enum: KYCLevel,
