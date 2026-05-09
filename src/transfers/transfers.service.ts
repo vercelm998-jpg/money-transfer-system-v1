@@ -58,23 +58,21 @@ export class TransfersService {
       if (receiver.status !== UserStatus.ACTIVE) throw new BadRequestException('حساب المستلم غير نشط');
 
       // ✅ حساب العمولة
-      let commission: number;
       
-      this.logger.log(`🔍 commissionAmount: ${commissionAmount} (type: ${typeof commissionAmount})`);
-      
+      // ✅ لا عمولة إلا إذا أدخلها المستخدم
+      let commission = 0;
+
       if (commissionAmount !== undefined && commissionAmount !== null) {
         commission = Number(commissionAmount);
-        this.logger.log(`✅ Custom commission: ${commission}`);
+        this.logger.log(`✅ عمولة مخصصة: ${commission}`);
       } else {
-        const rate = Number(sender.commissionRate) || 0.01;
-        commission = Number((amount * rate).toFixed(2));
-        this.logger.log(`✅ Default commission (${rate * 100}%): ${commission}`);
+        commission = 0; // لا عمولة افتراضية
+        this.logger.log(`✅ بدون عمولة`);
       }
 
-      const totalAmount = Number((amount + commission).toFixed(2));
+const totalAmount = Number((amount + commission).toFixed(2));
 
-      this.logger.log(`💰 Amount=${amount} | Commission=${commission} | Total=${totalAmount}`);
-
+this.logger.log(`💰 المبلغ=${amount} | العمولة=${commission} | الإجمالي=${totalAmount}`);
       // التحقق من الرصيد
       const senderBalance = Number(sender.points);
       if (senderBalance < totalAmount) {
