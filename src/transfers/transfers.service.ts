@@ -57,31 +57,24 @@ export class TransfersService {
       if (sender.status !== UserStatus.ACTIVE) throw new ForbiddenException('حسابك غير نشط');
       if (receiver.status !== UserStatus.ACTIVE) throw new BadRequestException('حساب المستلم غير نشط');
 
-      // ✅ حساب العمولة
-      
       // ✅ لا عمولة إلا إذا أدخلها المستخدم
       let commission = 0;
-
       if (commissionAmount !== undefined && commissionAmount !== null) {
         commission = Number(commissionAmount);
-        this.logger.log(`✅ عمولة مخصصة: ${commission}`);
-      } else {
-        commission = 0; // لا عمولة افتراضية
-        this.logger.log(`✅ بدون عمولة`);
       }
 
-const totalAmount = Number((amount + commission).toFixed(2));
+      const totalAmount = Number((amount + commission).toFixed(2));
 
-this.logger.log(`💰 المبلغ=${amount} | العمولة=${commission} | الإجمالي=${totalAmount}`);
+      this.logger.log(`💰 المبلغ=${amount} | العمولة=${commission} | الإجمالي=${totalAmount}`);
+
       // التحقق من الرصيد
       const senderBalance = Number(sender.points);
       if (senderBalance < totalAmount) {
         throw new BadRequestException(`رصيدك غير كافي. الرصيد: ${senderBalance.toFixed(2)}`);
       }
 
-      // ✅ تحديث رصيد المرسل
+      // ✅ تحديث رصيد المرسل - مرة واحدة فقط
       const newSenderBalance = Number((senderBalance - totalAmount).toFixed(2));
-      
       await queryRunner.manager.update(User, senderId, {
         points: newSenderBalance,
         dailyTransferred: Number((Number(sender.dailyTransferred || 0) + amount).toFixed(2)),
@@ -90,19 +83,15 @@ this.logger.log(`💰 المبلغ=${amount} | العمولة=${commission} | ا
         lastTransferAt: new Date(),
       });
 
-      // ✅ جلب رصيد المستلم الحقيقي من DB ثم تحديثه
-      const currentReceiver = await queryRunner.manager.findOne(User, {
-        where: { id: receiverId },
-        select: ['id', 'points'],
-      });
-      const newReceiverBalance = Number((Number(currentReceiver.points) + amount).toFixed(2));
-      
+      // ✅ تحديث رصيد المستلم - مرة واحدة فقط
+      const currentReceiverBalance = Number(receiver.points);
+      const newReceiverBalance = Number((currentReceiverBalance + amount).toFixed(2));
       await queryRunner.manager.update(User, receiverId, {
         points: newReceiverBalance,
       });
 
       this.logger.log(`✅ SENDER: ${sender.username} | ${senderBalance} → ${newSenderBalance}`);
-      this.logger.log(`✅ RECEIVER: ${receiver.username} | ${currentReceiver.points} → ${newReceiverBalance}`);
+      this.logger.log(`✅ RECEIVER: ${receiver.username} | ${currentReceiverBalance} → ${newReceiverBalance}`);
 
       // إنشاء سجل التحويل
       const transfer = new Transfer();
@@ -124,15 +113,27 @@ this.logger.log(`💰 المبلغ=${amount} | العمولة=${commission} | ا
 
       const savedTransfer = await queryRunner.manager.save(transfer);
 
-      // محفظة - إشعارات - تدقيق
+      // ✅ سجل في المحفظة للمرسل فقط (وليس للمستلم لتجنب المضاعفة)
       try {
-        await this.walletService.recordTransaction(senderId, -totalAmount, 'transfer_out', `تحويل ${amount} إلى ${receiver.username}`, savedTransfer.id, queryRunner);
-        await this.walletService.recordTransaction(receiverId, amount, 'transfer_in', `استلام ${amount} من ${sender.username}`, savedTransfer.id, queryRunner);
-      } catch (e) { this.logger.warn('Wallet: ' + e.message); }
+        await this.walletService.recordTransaction(
+          senderId, -totalAmount, 'transfer_out',
+          `تحويل ${amount} إلى ${receiver.username}`,
+          savedTransfer.id, queryRunner
+        );
+      } catch (e) { this.logger.warn('Wallet sender: ' + e.message); }
 
+      // إشعارات
       try {
-        await this.notificationsService.createNotification({ userId: receiverId, title: '💰 تحويل جديد', message: `تم استلام ${amount} من ${sender.username}`, type: 'transfer_received', transferId: savedTransfer.id });
-        await this.notificationsService.createNotification({ userId: senderId, title: '✅ تم التحويل', message: `تم تحويل ${amount} إلى ${receiver.username}`, type: 'transfer_sent', transferId: savedTransfer.id });
+        await this.notificationsService.createNotification({
+          userId: receiverId, title: '💰 تحويل جديد',
+          message: `تم استلام ${amount} من ${sender.username}`,
+          type: 'transfer_received', transferId: savedTransfer.id,
+        });
+        await this.notificationsService.createNotification({
+          userId: senderId, title: '✅ تم التحويل',
+          message: `تم تحويل ${amount} إلى ${receiver.username}`,
+          type: 'transfer_sent', transferId: savedTransfer.id,
+        });
       } catch (e) { this.logger.warn('Notif: ' + e.message); }
 
       await queryRunner.commitTransaction();
@@ -184,22 +185,23 @@ this.logger.log(`💰 المبلغ=${amount} | العمولة=${commission} | ا
     }
 
     if (filters?.startDate && filters?.endDate) {
-      queryBuilder.andWhere('transfer.createdAt BETWEEN :startDate AND :endDate', { startDate: new Date(filters.startDate), endDate: new Date(filters.endDate) });
+      queryBuilder.andWhere('transfer.createdAt BETWEEN :startDate AND :endDate', {
+        startDate: new Date(filters.startDate), endDate: new Date(filters.endDate),
+      });
     }
     if (filters?.status) queryBuilder.andWhere('transfer.status = :status', { status: filters.status });
 
-    const sortBy = filters?.sortBy || 'createdAt';
-    const sortOrder = filters?.sortOrder || 'DESC';
-    const page = filters?.page || 1;
-    const limit = filters?.limit || 20;
-
-    queryBuilder.orderBy(`transfer.${sortBy}`, sortOrder).skip((page - 1) * limit).take(limit);
+    queryBuilder.orderBy(`transfer.${filters?.sortBy || 'createdAt'}`, filters?.sortOrder || 'DESC')
+      .skip(((filters?.page || 1) - 1) * (filters?.limit || 20))
+      .take(filters?.limit || 20);
 
     const [transfers, total] = await queryBuilder.getManyAndCount();
 
     return {
-      transfers, total, page, limit,
-      totalPages: Math.ceil(total / limit),
+      transfers, total,
+      page: filters?.page || 1,
+      limit: filters?.limit || 20,
+      totalPages: Math.ceil(total / (filters?.limit || 20)),
       summary: {
         totalAmount: transfers.reduce((sum, t) => sum + Number(t.amount), 0),
         totalCommission: transfers.reduce((sum, t) => sum + Number(t.commission), 0),
@@ -233,7 +235,6 @@ this.logger.log(`💰 المبلغ=${amount} | العمولة=${commission} | ا
       relations: ['sender', 'receiver'],
       order: { createdAt: 'DESC' },
     });
-
     return {
       receivedPending: transfers.filter(t => t.receiverId === userId),
       sentPending: transfers.filter(t => t.senderId === userId),
