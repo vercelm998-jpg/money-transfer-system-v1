@@ -113,7 +113,7 @@ export class TransfersService {
 
       const savedTransfer = await queryRunner.manager.save(transfer);
 
-      // ✅ سجل في المحفظة للمرسل فقط (وليس للمستلم لتجنب المضاعفة)
+      // ✅ سجل في المحفظة للمرسل فقط
       try {
         await this.walletService.recordTransaction(
           senderId, -totalAmount, 'transfer_out',
@@ -175,6 +175,7 @@ export class TransfersService {
     return transfer;
   }
 
+  // ✅ تحديث getTransferHistory مع البحث المتقدم
   async getTransferHistory(userId: number, role: string, filters?: any): Promise<any> {
     const queryBuilder = this.transfersRepository.createQueryBuilder('transfer')
       .leftJoinAndSelect('transfer.sender', 'sender')
@@ -182,6 +183,18 @@ export class TransfersService {
 
     if (role !== 'admin' && role !== 'moderator') {
       queryBuilder.where('(transfer.senderId = :userId OR transfer.receiverId = :userId)', { userId });
+    }
+
+    // ✅ بحث متقدم
+    if (filters?.search) {
+      queryBuilder.andWhere(
+        `(transfer.referenceNumber LIKE :search 
+          OR transfer.note LIKE :search 
+          OR sender.username LIKE :search 
+          OR receiver.username LIKE :search
+          OR CAST(transfer.createdAt AS TEXT) LIKE :search)`,
+        { search: `%${filters.search}%` }
+      );
     }
 
     if (filters?.startDate && filters?.endDate) {
