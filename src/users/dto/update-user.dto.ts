@@ -6,7 +6,8 @@ import {
   IsNumber,
   IsBoolean,
   Min,
-  IsObject
+  IsObject, 
+  MaxLength
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { UserRole, UserStatus, KYCLevel } from '../user.entity';
@@ -31,6 +32,21 @@ export class UpdateUserDto {
   @IsOptional()
   @IsEnum(UserStatus)
   status?: UserStatus;
+
+  
+
+  @ApiPropertyOptional({ description: 'الجهة (مؤسسة - فرد...)', example: 'شركة الأمل' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  organization?: string;
+
+  @ApiPropertyOptional({ description: 'العنوان', example: 'دمشق - شارع الحمراء' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  address?: string;
+}
 
   @ApiPropertyOptional({ description: 'مستوى KYC', enum: KYCLevel })
   @IsOptional()
