@@ -28,6 +28,12 @@ export class CreateTransferDto {
   @Min(0.01)
   amount: number;
 
+  @ApiPropertyOptional({ description: 'اسم المستفيد', example: 'أحمد محمد' })
+@IsOptional()
+@IsString()
+@MaxLength(100)
+beneficiaryName?: string;
+
   @ApiPropertyOptional({ description: 'مبلغ العمولة (يدوياً)', example: 10 })
   @IsOptional()
   @IsNumber()
