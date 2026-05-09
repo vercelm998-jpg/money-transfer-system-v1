@@ -41,6 +41,10 @@ export class Transfer {
   @JoinColumn({ name: 'senderId' })
   sender: User;
 
+// 🆕 اسم المستفيد (للحوالات الخارجية أو لعرض اسم المستلم)
+@Column({ nullable: true, length: 100 })
+beneficiaryName: string;
+  
   @Column()
   senderId: number;
 
