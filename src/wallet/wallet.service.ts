@@ -81,10 +81,10 @@ export class WalletService {
 
     const savedTransaction = await transactionRepo.save(transaction);
 
-    // تحديث رصيد المستخدم
-    await userRepo.update(userId, { 
-      points: balanceAfter 
-    });
+    // // تحديث رصيد المستخدم
+    // await userRepo.update(userId, { 
+    //   points: balanceAfter 
+    // });
 
     this.logger.log(
       `💰 محفظة - ${type}: ${amount} | المستخدم ${userId} | الرصيد: ${balanceBefore} -> ${balanceAfter} | REF: ${savedTransaction.transactionReference}`
