@@ -26,9 +26,31 @@ async function bootstrapServer() {
   app.useGlobalFilters(new HttpExceptionFilter());
   app.useGlobalInterceptors(new TransformInterceptor());
 
+  // ✅ معالجة الرابط الرئيسي
+  const httpAdapter = app.getHttpAdapter();
+  httpAdapter.get('/', (req, res) => {
+    res.json({
+      message: '🚀 نظام التحويلات API يعمل بنجاح',
+      version: '1.0.0',
+      status: 'online',
+      docs: '/api/docs',
+      endpoints: {
+        auth: {
+          login: '/api/v1/auth/login',
+          register: '/api/v1/auth/register',
+        },
+        users: '/api/v1/users',
+        transfers: '/api/v1/transfers',
+        wallet: '/api/v1/wallet',
+        notifications: '/api/v1/notifications',
+        reports: '/api/v1/reports',
+      },
+    });
+  });
+
   await app.init();
   
-  return app.getHttpAdapter().getInstance();
+  return httpAdapter.getInstance();
 }
 
 // Vercel handler
