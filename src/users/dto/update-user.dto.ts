@@ -27,6 +27,10 @@ export class UpdateUserDto {
   @IsOptional()
   @IsEnum(UserRole)
   role?: UserRole;
+  
+  @ApiPropertyOptional({ description: 'الرصيد (نقاط)', example: 1000 })
+  @IsOptional() @IsNumber() @Min(0)
+  points?: number;
 
   @ApiPropertyOptional({ description: 'حالة المستخدم', enum: UserStatus })
   @IsOptional()
