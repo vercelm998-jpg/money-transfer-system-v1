@@ -10,7 +10,8 @@ import {
   SetMetadata,
   HttpCode,
   HttpStatus,
-  Request
+  Request,
+  Res
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { Response } from 'express';
