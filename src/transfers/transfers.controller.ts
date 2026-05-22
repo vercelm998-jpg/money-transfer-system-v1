@@ -64,6 +64,17 @@ export class TransfersController {
   async getPendingDelivery(@CurrentUser() user: any) {
     return this.transfersService.getPendingDeliveryTransfers(user.id);
   }
+  @Get(':id/receipt')
+@UseGuards(AuthGuard('jwt'))
+@ApiBearerAuth()
+@ApiOperation({ summary: 'تحميل إيصال PDF للتحويل' })
+async downloadReceipt(
+  @CurrentUser() user: any,
+  @Param('id') id: number,
+  @Res() res: Response,
+) {
+  return this.transfersService.generateReceipt(id, user.id, user.role, res);
+}
 
   @Get('delivery-stats')
   @UseGuards(AuthGuard('jwt'))
