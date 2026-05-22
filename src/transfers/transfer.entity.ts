@@ -73,6 +73,7 @@ beneficiaryName: string;
   // 🆕 حقل تأكيد التسليم
   @Column({ type: 'boolean', default: false })
   isDelivered: boolean;
+  
 
   // 🆕 تاريخ تأكيد التسليم
   @Column({ type: 'timestamp', nullable: true })
@@ -105,6 +106,7 @@ deliveredAt: Date;
     device?: string;
     createdBy?: string;
     commissionRate?: number;
+    currency?: string;
   };
 
   @CreateDateColumn()
