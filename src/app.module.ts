@@ -17,30 +17,8 @@ import { AuditModule } from './audit/audit.module';
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
 
-    // ✅ إعداد البريد الإلكتروني
-    MailerModule.forRootAsync({
-      imports: [ConfigModule],
-      useFactory: (config: ConfigService) => ({
-        transport: {
-          host: config.get('SMTP_HOST', 'smtp.gmail.com'),
-          port: config.get<number>('SMTP_PORT', 587),
-          secure: false,
-          auth: {
-            user: config.get('SMTP_USER'),
-            pass: config.get('SMTP_PASS'),
-          },
-        },
-        defaults: {
-          from: `"نظام التحويلات" <${config.get('SMTP_FROM', 'noreply@moneytransfer.com')}>`,
-        },
-        template: {
-          dir: join(__dirname, '..', 'templates'),
-          adapter: new HandlebarsAdapter(),
-          options: { strict: true },
-        },
-      }),
-      inject: [ConfigService],
-    }),
+
+    
 
     TypeOrmModule.forRoot({
       type: 'postgres',
