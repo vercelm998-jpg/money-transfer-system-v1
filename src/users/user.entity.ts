@@ -51,14 +51,24 @@ export class User {
   @Column()
   @Exclude()
   password: string;
+
+  // 🆕 الاسم الكامل
+  @Column({ nullable: true, length: 100 })
+  fullName: string;
+
+  // 🆕 إعادة تعيين كلمة المرور
   @Column({ nullable: true })
-resetCode: string;
+  resetCode: string;
 
-@Column({ nullable: true })
-resetCodeExpiry: Date;
+  @Column({ type: 'timestamp', nullable: true })
+  resetCodeExpiry: Date;
 
-  Column({nullable: true, length: 100)}
-  full_name:string;
+  @Column({ default: 0 })
+  resetAttempts: number;
+
+  @Column({ type: 'timestamp', nullable: true })
+  lastResetRequest: Date;
+
   // 🆕 الجهة (مؤسسة - فرد - جهة حكومية...)
   @Column({ nullable: true, length: 100 })
   organization: string;
@@ -117,6 +127,8 @@ resetCodeExpiry: Date;
     notifications?: boolean;
     emailNotifications?: boolean;
     smsNotifications?: boolean;
+    darkMode?: boolean;
+    biometricLock?: boolean;
   };
 
   @Column({ nullable: true })
