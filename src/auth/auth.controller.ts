@@ -27,6 +27,23 @@ export class AuthController {
     return this.authService.register(registerDto);
   }
 
+  @Post('forgot-password')
+@HttpCode(HttpStatus.OK)
+@ApiOperation({ summary: 'طلب إعادة تعيين كلمة المرور' })
+async forgotPassword(@Body('email') email: string) {
+  return this.authService.forgotPassword(email);
+}
+
+@Post('reset-password')
+@HttpCode(HttpStatus.OK)
+@ApiOperation({ summary: 'إعادة تعيين كلمة المرور' })
+async resetPassword(
+  @Body('email') email: string,
+  @Body('code') code: string,
+  @Body('newPassword') newPassword: string,
+) {
+  return this.authService.resetPassword(email, code, newPassword);
+}
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'تسجيل الدخول' })
