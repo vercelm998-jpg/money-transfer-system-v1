@@ -14,6 +14,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { AuditService } from '../audit/audit.service';
 import { WalletService } from '../wallet/wallet.service';
 import * as PDFDocument from 'pdfkit';
+import { Response } from 'express';  // ✅ أضف هذا في الأعلى
 
 @Injectable()
 export class TransfersService {
