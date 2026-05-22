@@ -5,8 +5,7 @@ import {
   BadRequestException,
   Logger
 } from '@nestjs/common';
-  // استيراد إضافي في الأعلى
-import { MailerService } from '@nestjs-modules/mailer'; // أو خدمة بريد أخرى
+import { MailerService } from '@nestjs-modules/mailer';
 import { randomInt } from 'crypto';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -25,6 +24,7 @@ export class AuthService {
     private usersRepository: Repository<User>,
     private jwtService: JwtService,
     private auditService: AuditService,
+    private mailerService: MailerService,
   ) {}
 
   async validateUser(username: string, password: string): Promise<any> {
@@ -33,215 +33,117 @@ export class AuthService {
       select: ['id', 'username', 'email', 'password', 'points', 'role', 'status', 'kycLevel']
     });
     
-    if (!user) {
-      throw new UnauthorizedException('اسم المستخدم أو كلمة المرور غير صحيحة');
-    }
-
-    if (user.status === 'suspended') {
-      throw new UnauthorizedException('تم تعليق حسابك. يرجى التواصل مع الدعم الفني');
-    }
-
-    if (user.status === 'frozen') {
-      throw new UnauthorizedException('تم تجميد حسابك. يرجى التواصل مع الدعم الفني');
-    }
+    if (!user) throw new UnauthorizedException('اسم المستخدم أو كلمة المرور غير صحيحة');
+    if (user.status === 'suspended') throw new UnauthorizedException('تم تعليق حسابك');
+    if (user.status === 'frozen') throw new UnauthorizedException('تم تجميد حسابك');
 
     const isPasswordValid = await bcrypt.compare(password, user.password);
-    
-    if (!isPasswordValid) {
-      throw new UnauthorizedException('اسم المستخدم أو كلمة المرور غير صحيحة');
-    }
+    if (!isPasswordValid) throw new UnauthorizedException('اسم المستخدم أو كلمة المرور غير صحيحة');
 
     const { password: _, ...result } = user;
     return result;
   }
 
-
-
-// ✅ إنشاء وإرسال رمز إعادة التعيين
-async forgotPassword(email: string): Promise<{ message: string }> {
-  const user = await this.usersRepository.findOne({ where: { email } });
-  
-  if (!user) {
-    // لا تخبر المستخدم أن البريد غير موجود (أمان)
-    return { message: 'إذا كان البريد مسجلاً، سيصلك رمز إعادة التعيين' };
-  }
-
-  // إنشاء رمز 6 أرقام
-  const resetCode = randomInt(100000, 999999).toString();
-  
-  // حفظ الرمز في user (تحتاج إضافة حقل resetCode و resetCodeExpiry في user.entity)
-  user.resetCode = resetCode;
-  user.resetCodeExpiry = new Date(Date.now() + 15 * 60 * 1000); // صالح 15 دقيقة
-  await this.usersRepository.save(user);
-
-  // إرسال الرمز عبر البريد الإلكتروني
-  // await this.mailerService.sendMail({ ... });
-  
-  // للتجربة - اطبع الرمز في الكونسول
-  this.logger.log(`🔑 Reset code for ${email}: ${resetCode}`);
-
-  return { message: 'تم إرسال رمز إعادة التعيين إلى بريدك الإلكتروني' };
-}
-
-// ✅ التحقق من الرمز وتغيير كلمة المرور
-async resetPassword(email: string, code: string, newPassword: string): Promise<{ message: string }> {
-  const user = await this.usersRepository.findOne({ where: { email } });
-  
-  if (!user || !user.resetCode || !user.resetCodeExpiry) {
-    throw new BadRequestException('رمز إعادة التعيين غير صالح');
-  }
-
-  if (user.resetCode !== code) {
-    throw new BadRequestException('الرمز غير صحيح');
-  }
-
-  if (new Date() > user.resetCodeExpiry) {
-    throw new BadRequestException('انتهت صلاحية الرمز');
-  }
-
-  // تغيير كلمة المرور
-  user.password = await bcrypt.hash(newPassword, 12);
-  user.resetCode = null;
-  user.resetCodeExpiry = null;
-  await this.usersRepository.save(user);
-
-  return { message: 'تم تغيير كلمة المرور بنجاح' };
-}
   async login(loginDto: LoginDto) {
     const user = await this.validateUser(loginDto.username, loginDto.password);
-    
-    const payload = { 
-      sub: user.id,
-      username: user.username, 
-      role: user.role,
-      kycLevel: user.kycLevel
-    };
-    
+    const payload = { sub: user.id, username: user.username, role: user.role, kycLevel: user.kycLevel };
     const accessToken = this.jwtService.sign(payload);
 
-    // تحديث آخر تسجيل دخول
-    await this.usersRepository.update(user.id, {
-      lastLoginAt: new Date()
-    });
+    await this.usersRepository.update(user.id, { lastLoginAt: new Date() });
+    await this.auditService.logAction(user.id, 'LOGIN', 'تسجيل دخول ناجح', { timestamp: new Date() });
+    this.logger.log(`User ${user.username} logged in`);
 
-    // تسجيل التدقيق
-    await this.auditService.logAction(
-      user.id,
-      'LOGIN',
-      'تسجيل دخول ناجح',
-      { timestamp: new Date() }
-    );
-
-    this.logger.log(`User ${user.username} logged in successfully`);
-
-    return {
-      access_token: accessToken,
-      user: {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        points: user.points,
-        role: user.role,
-        kycLevel: user.kycLevel
-      }
-    };
+    return { access_token: accessToken, user: { id: user.id, username: user.username, email: user.email, points: user.points, role: user.role, kycLevel: user.kycLevel } };
   }
 
   async register(registerDto: RegisterDto) {
-    // التحقق من وجود المستخدم
-    const existingUser = await this.usersRepository.findOne({
-      where: [
-        { username: registerDto.username },
-        { email: registerDto.email }
-      ]
-    });
-
+    const existingUser = await this.usersRepository.findOne({ where: [{ username: registerDto.username }, { email: registerDto.email }] });
     if (existingUser) {
-      if (existingUser.username === registerDto.username) {
-        throw new ConflictException('اسم المستخدم موجود بالفعل');
-      }
-      if (existingUser.email === registerDto.email) {
-        throw new ConflictException('البريد الإلكتروني موجود بالفعل');
-      }
+      if (existingUser.username === registerDto.username) throw new ConflictException('اسم المستخدم موجود بالفعل');
+      throw new ConflictException('البريد الإلكتروني موجود بالفعل');
     }
 
-    // تشفير كلمة المرور
     const hashedPassword = await bcrypt.hash(registerDto.password, 12);
-    
-    // إنشاء المستخدم
-    const user = this.usersRepository.create({
-      ...registerDto,
-      password: hashedPassword,
-      preferences: {
-        language: 'ar',
-        currency: 'USD',
-        notifications: true,
-        emailNotifications: true,
-        smsNotifications: false,
-      }
-    });
-    
+    const user = this.usersRepository.create({ ...registerDto, password: hashedPassword, preferences: { language: 'ar', currency: 'USD', notifications: true, emailNotifications: true, smsNotifications: false } });
     await this.usersRepository.save(user);
+    await this.auditService.logAction(user.id, 'REGISTER', 'تسجيل حساب جديد', { email: user.email });
+    this.logger.log(`New user: ${user.username}`);
 
-    // تسجيل التدقيق
-    await this.auditService.logAction(
-      user.id,
-      'REGISTER',
-      'تسجيل حساب جديد',
-      { email: user.email }
-    );
-
-    this.logger.log(`New user registered: ${user.username}`);
-
-    // تسجيل الدخول مباشرة بعد التسجيل
-    const loginDto: LoginDto = {
-      username: registerDto.username,
-      password: registerDto.password
-    };
-
-    return this.login(loginDto);
+    return this.login({ username: registerDto.username, password: registerDto.password });
   }
 
   async refreshToken(userId: number) {
     const user = await this.usersRepository.findOne({ where: { id: userId } });
-    
-    if (!user) {
-      throw new UnauthorizedException('المستخدم غير موجود');
-    }
-
-    const payload = { 
-      sub: user.id,
-      username: user.username, 
-      role: user.role,
-      kycLevel: user.kycLevel
-    };
-
-    return {
-      access_token: this.jwtService.sign(payload),
-    };
+    if (!user) throw new UnauthorizedException('المستخدم غير موجود');
+    const payload = { sub: user.id, username: user.username, role: user.role, kycLevel: user.kycLevel };
+    return { access_token: this.jwtService.sign(payload) };
   }
 
   async changePassword(userId: number, oldPassword: string, newPassword: string) {
-    const user = await this.usersRepository.findOne({ 
-      where: { id: userId },
-      select: ['id', 'password']
-    });
+    const user = await this.usersRepository.findOne({ where: { id: userId }, select: ['id', 'password'] });
+    if (!await bcrypt.compare(oldPassword, user.password)) throw new BadRequestException('كلمة المرور الحالية غير صحيحة');
+    await this.usersRepository.update(userId, { password: await bcrypt.hash(newPassword, 12) });
+    await this.auditService.logAction(userId, 'CHANGE_PASSWORD', 'تغيير كلمة المرور');
+    return { message: 'تم تغيير كلمة المرور بنجاح' };
+  }
 
-    const isPasswordValid = await bcrypt.compare(oldPassword, user.password);
-    
-    if (!isPasswordValid) {
-      throw new BadRequestException('كلمة المرور الحالية غير صحيحة');
+  // ========== نسيت كلمة المرور ==========
+
+  async forgotPassword(email: string): Promise<{ message: string }> {
+    const user = await this.usersRepository.findOne({ where: { email } });
+    const response = { message: 'إذا كان البريد مسجلاً، سيصلك رمز إعادة التعيين' };
+    if (!user) return response;
+
+    // منع الطلبات المتكررة
+    if (user.lastResetRequest) {
+      const diff = Date.now() - new Date(user.lastResetRequest).getTime();
+      if (diff < 60000) return { message: 'يرجى الانتظار دقيقة قبل طلب رمز جديد' };
     }
 
-    const hashedPassword = await bcrypt.hash(newPassword, 12);
-    await this.usersRepository.update(userId, { password: hashedPassword });
+    if (user.resetAttempts >= 5) {
+      const lastAttempt = new Date(user.lastResetRequest || 0);
+      if (Date.now() - lastAttempt.getTime() < 3600000) return { message: 'تجاوزت الحد الأقصى. حاول بعد ساعة' };
+      user.resetAttempts = 0;
+    }
 
-    await this.auditService.logAction(
-      userId,
-      'CHANGE_PASSWORD',
-      'تغيير كلمة المرور'
-    );
+    const resetCode = randomInt(100000, 999999).toString();
+    user.resetCode = resetCode;
+    user.resetCodeExpiry = new Date(Date.now() + 15 * 60 * 1000);
+    user.resetAttempts = (user.resetAttempts || 0) + 1;
+    user.lastResetRequest = new Date();
+    await this.usersRepository.save(user);
 
+    // إرسال البريد
+    try {
+      await this.mailerService.sendMail({
+        to: email,
+        subject: '🔐 إعادة تعيين كلمة المرور - نظام التحويلات',
+        template: 'reset-password',
+        context: { username: user.username, code: resetCode, year: new Date().getFullYear() },
+      });
+      this.logger.log(`✅ Reset code sent to ${email}`);
+    } catch (error) {
+      this.logger.error(`❌ Email failed: ${error.message}`);
+    }
+
+    return response;
+  }
+
+  async resetPassword(email: string, code: string, newPassword: string): Promise<{ message: string }> {
+    const user = await this.usersRepository.findOne({ where: { email } });
+    if (!user || !user.resetCode) throw new BadRequestException('رمز إعادة التعيين غير صالح');
+    if (user.resetCode !== code) throw new BadRequestException('الرمز غير صحيح');
+    if (!user.resetCodeExpiry || new Date() > new Date(user.resetCodeExpiry)) throw new BadRequestException('انتهت صلاحية الرمز');
+    if (newPassword.length < 6) throw new BadRequestException('كلمة المرور 6 أحرف على الأقل');
+
+    user.password = await bcrypt.hash(newPassword, 12);
+    user.resetCode = null;
+    user.resetCodeExpiry = null;
+    user.resetAttempts = 0;
+    user.lastResetRequest = null;
+    await this.usersRepository.save(user);
+
+    await this.auditService.logAction(user.id, 'PASSWORD_RESET', 'إعادة تعيين كلمة المرور');
     return { message: 'تم تغيير كلمة المرور بنجاح' };
   }
 }
