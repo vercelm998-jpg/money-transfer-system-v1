@@ -13,6 +13,7 @@ import { CreateTransferDto } from './dto/create-transfer.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditService } from '../audit/audit.service';
 import { WalletService } from '../wallet/wallet.service';
+import * as PDFDocument from 'pdfkit';
 
 @Injectable()
 export class TransfersService {
@@ -128,6 +129,141 @@ export class TransfersService {
     return { success: true, message: 'تم تأكيد الاستلام' };
   }
 
+
+  
+
+async generateReceipt(transferId: number, userId: number, role: string, res: any): Promise<void> {
+  const transfer = await this.transfersRepository.findOne({
+    where: { id: transferId },
+    relations: ['sender', 'receiver'],
+  });
+
+  if (!transfer) throw new NotFoundException('التحويل غير موجود');
+  if (transfer.sender.id !== userId && transfer.receiver.id !== userId && role !== 'admin') {
+    throw new ForbiddenException('غير مصرح لك');
+  }
+
+  const currency = transfer.metadata?.currency || 'USD';
+  const currencySymbols = { USD: '$', EUR: '€', SYP: 'ل.س', TRY: '₺', SAR: 'ر.س' };
+  const currencySymbol = currencySymbols[currency] || currency;
+
+  // إنشاء PDF
+  const doc = new PDFDocument({ size: 'A4', margin: 50 });
+  
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename=receipt-${transfer.referenceNumber}.pdf`);
+  doc.pipe(res);
+
+  // ✅ رأسية الإيصال
+  doc.fontSize(22).font('Helvetica-Bold').text('إيصال تحويل', { align: 'center' });
+  doc.moveDown(0.5);
+  doc.fontSize(12).font('Helvetica').text('نظام التحويلات المالية', { align: 'center' });
+  doc.moveDown(0.3);
+  doc.fontSize(8).fillColor('#999').text(`تاريخ الإصدار: ${new Date().toLocaleDateString('ar-SA')}`, { align: 'center' });
+  doc.fillColor('#000');
+
+  // خط فاصل
+  doc.moveDown(0.5);
+  doc.strokeColor('#6C63FF').lineWidth(1).moveTo(50, doc.y).lineTo(545, doc.y).stroke();
+  doc.moveDown(0.5);
+
+  // ✅ رقم المرجع والتاريخ
+  doc.fontSize(14).font('Helvetica-Bold').text(`رقم المرجع: ${transfer.referenceNumber}`, { align: 'center' });
+  doc.moveDown(0.2);
+  doc.fontSize(10).font('Helvetica').fillColor('#666').text(
+    `تاريخ التحويل: ${new Date(transfer.createdAt).toLocaleDateString('ar-SA')} - ${new Date(transfer.createdAt).toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' })}`,
+    { align: 'center' }
+  );
+  doc.fillColor('#000');
+  doc.moveDown(1);
+
+  // ✅ حالة التحويل
+  const statusColor = transfer.status === 'completed' ? '#4CAF50' : transfer.isDelivered ? '#2196F3' : '#FF9800';
+  const statusText = transfer.isDelivered ? '✅ تم التسليم' : transfer.status === 'completed' ? '✅ مكتمل' : '⏳ قيد الانتظار';
+  doc.fontSize(12).font('Helvetica-Bold').fillColor(statusColor).text(statusText, { align: 'center' });
+  doc.fillColor('#000');
+  doc.moveDown(0.8);
+
+  // ✅ المبلغ
+  doc.strokeColor('#E0E0E0').lineWidth(0.5).moveTo(50, doc.y).lineTo(545, doc.y).stroke();
+  doc.moveDown(0.5);
+  doc.fontSize(16).font('Helvetica-Bold').text('المبلغ', { align: 'center' });
+  doc.moveDown(0.3);
+  doc.fontSize(32).font('Helvetica-Bold').fillColor('#6C63FF').text(
+    `${Number(transfer.amount).toLocaleString('ar-SA')} ${currencySymbol}`,
+    { align: 'center' }
+  );
+  doc.fillColor('#000');
+  
+  if (transfer.commission > 0) {
+    doc.moveDown(0.2);
+    doc.fontSize(11).font('Helvetica').fillColor('#FF9800').text(
+      `العمولة: ${Number(transfer.commission).toLocaleString('ar-SA')} ${currencySymbol}`,
+      { align: 'center' }
+    );
+    doc.fillColor('#000');
+  }
+  
+  doc.moveDown(0.3);
+  doc.strokeColor('#E0E0E0').lineWidth(0.5).moveTo(200, doc.y).lineTo(395, doc.y).stroke();
+  doc.moveDown(0.3);
+  doc.fontSize(10).font('Helvetica').fillColor('#666').text(
+    `الإجمالي: ${Number(transfer.totalAmount).toLocaleString('ar-SA')} ${currencySymbol}`,
+    { align: 'center' }
+  );
+  doc.fillColor('#000');
+  doc.moveDown(1);
+
+  // ✅ المرسل والمستلم
+  doc.strokeColor('#E0E0E0').lineWidth(0.5).moveTo(50, doc.y).lineTo(545, doc.y).stroke();
+  doc.moveDown(0.8);
+  
+  // المرسل (يسار) والمستلم (يمين)
+  const startY = doc.y;
+  
+  // المرسل
+  doc.fontSize(11).font('Helvetica-Bold').text('المرسل', 50, startY);
+  doc.fontSize(10).font('Helvetica').text(transfer.sender?.username || 'غير معروف', 50, startY + 20);
+  doc.fontSize(8).fillColor('#999').text(transfer.sender?.email || '', 50, startY + 36);
+  doc.fillColor('#000');
+  
+  // المستلم
+  doc.fontSize(11).font('Helvetica-Bold').text('المستلم', 320, startY);
+  doc.fontSize(10).font('Helvetica').text(transfer.receiver?.username || 'غير معروف', 320, startY + 20);
+  doc.fontSize(8).fillColor('#999').text(transfer.receiver?.email || '', 320, startY + 36);
+  doc.fillColor('#000');
+  
+  // اسم المستفيد
+  if (transfer.beneficiaryName && transfer.beneficiaryName !== transfer.receiver?.username) {
+    doc.fontSize(9).font('Helvetica').fillColor('#1565C0').text(`المستفيد: ${transfer.beneficiaryName}`, 320, startY + 50);
+    doc.fillColor('#000');
+  }
+  
+  doc.moveDown(4);
+
+  // ✅ ملاحظات
+  if (transfer.note) {
+    doc.strokeColor('#E0E0E0').lineWidth(0.5).moveTo(50, doc.y).lineTo(545, doc.y).stroke();
+    doc.moveDown(0.5);
+    doc.fontSize(10).font('Helvetica-Bold').text('ملاحظات:');
+    doc.moveDown(0.2);
+    doc.fontSize(9).font('Helvetica').fillColor('#666').text(transfer.note);
+    doc.fillColor('#000');
+    doc.moveDown(0.5);
+  }
+
+  // ✅ تذييل
+  doc.moveDown(1);
+  doc.strokeColor('#6C63FF').lineWidth(1).moveTo(50, doc.y).lineTo(545, doc.y).stroke();
+  doc.moveDown(0.5);
+  doc.fontSize(7).font('Helvetica').fillColor('#999').text(
+    'هذا الإيصال صادر من نظام التحويلات المالية - للتحقق من صحة الإيصال، امسح QR Code أو استخدم رقم المرجع',
+    { align: 'center' }
+  );
+  doc.fillColor('#000');
+
+  doc.end();
+}
   async getPendingDeliveryTransfers(uid: number) {
     const t = await this.transfersRepository.find({ where: [{ receiverId: uid, isDelivered: false, status: TransferStatus.COMPLETED }, { senderId: uid, isDelivered: false, status: TransferStatus.COMPLETED }], relations: ['sender', 'receiver'], order: { createdAt: 'DESC' } });
     return { receivedPending: t.filter(x => x.receiverId === uid), sentPending: t.filter(x => x.senderId === uid) };
