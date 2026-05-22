@@ -51,7 +51,14 @@ export class User {
   @Column()
   @Exclude()
   password: string;
+  @Column({ nullable: true })
+resetCode: string;
 
+@Column({ nullable: true })
+resetCodeExpiry: Date;
+
+  Column({nullable: true, length: 100)}
+  full_name:string;
   // 🆕 الجهة (مؤسسة - فرد - جهة حكومية...)
   @Column({ nullable: true, length: 100 })
   organization: string;
