@@ -5,6 +5,9 @@ import {
   BadRequestException,
   Logger
 } from '@nestjs/common';
+  // استيراد إضافي في الأعلى
+import { MailerService } from '@nestjs-modules/mailer'; // أو خدمة بريد أخرى
+import { randomInt } from 'crypto';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -52,6 +55,58 @@ export class AuthService {
     return result;
   }
 
+
+
+// ✅ إنشاء وإرسال رمز إعادة التعيين
+async forgotPassword(email: string): Promise<{ message: string }> {
+  const user = await this.usersRepository.findOne({ where: { email } });
+  
+  if (!user) {
+    // لا تخبر المستخدم أن البريد غير موجود (أمان)
+    return { message: 'إذا كان البريد مسجلاً، سيصلك رمز إعادة التعيين' };
+  }
+
+  // إنشاء رمز 6 أرقام
+  const resetCode = randomInt(100000, 999999).toString();
+  
+  // حفظ الرمز في user (تحتاج إضافة حقل resetCode و resetCodeExpiry في user.entity)
+  user.resetCode = resetCode;
+  user.resetCodeExpiry = new Date(Date.now() + 15 * 60 * 1000); // صالح 15 دقيقة
+  await this.usersRepository.save(user);
+
+  // إرسال الرمز عبر البريد الإلكتروني
+  // await this.mailerService.sendMail({ ... });
+  
+  // للتجربة - اطبع الرمز في الكونسول
+  this.logger.log(`🔑 Reset code for ${email}: ${resetCode}`);
+
+  return { message: 'تم إرسال رمز إعادة التعيين إلى بريدك الإلكتروني' };
+}
+
+// ✅ التحقق من الرمز وتغيير كلمة المرور
+async resetPassword(email: string, code: string, newPassword: string): Promise<{ message: string }> {
+  const user = await this.usersRepository.findOne({ where: { email } });
+  
+  if (!user || !user.resetCode || !user.resetCodeExpiry) {
+    throw new BadRequestException('رمز إعادة التعيين غير صالح');
+  }
+
+  if (user.resetCode !== code) {
+    throw new BadRequestException('الرمز غير صحيح');
+  }
+
+  if (new Date() > user.resetCodeExpiry) {
+    throw new BadRequestException('انتهت صلاحية الرمز');
+  }
+
+  // تغيير كلمة المرور
+  user.password = await bcrypt.hash(newPassword, 12);
+  user.resetCode = null;
+  user.resetCodeExpiry = null;
+  await this.usersRepository.save(user);
+
+  return { message: 'تم تغيير كلمة المرور بنجاح' };
+}
   async login(loginDto: LoginDto) {
     const user = await this.validateUser(loginDto.username, loginDto.password);
     
