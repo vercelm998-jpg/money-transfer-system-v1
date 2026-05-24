@@ -88,58 +88,36 @@ export class AuthService {
   }
 
   // ========== نسيت كلمة المرور ==========
-// ✅ طلب إعادة تعيين كلمة المرور
 async forgotPassword(email: string): Promise<{ message: string }> {
-  // ✅ سيظهر في سجلات Vercel فوراً
+  console.log(`🔵 forgotPassword called: ${email}`);  // ✅ أضف هذا
   this.logger.log(`🔵 forgotPassword called with email: ${email}`);
   
   const user = await this.usersRepository.findOne({ where: { email } });
+  console.log(`🟢 user exists: ${!!user}`);  // ✅ أضف هذا
   
   if (!user) {
-    this.logger.warn(`🟡 User not found for email: ${email}`);
+    console.log(`🟡 no user for: ${email}`);
     return { message: 'إذا كان البريد مسجلاً، سيصلك رمز إعادة التعيين' };
   }
 
-  this.logger.log(`🟢 User found: ${user.username}`);
-
-  // منع الطلبات المتكررة
-  if (user.lastResetRequest) {
-    const diff = Date.now() - new Date(user.lastResetRequest).getTime();
-    if (diff < 60000) {
-      this.logger.warn(`🟠 Too many requests for ${email}`);
-      return { message: 'يرجى الانتظار دقيقة قبل طلب رمز جديد' };
-    }
-  }
-
-  // إنشاء رمز 6 أرقام
+  console.log(`🟢 User found: ${user.username}`);
   const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
-  
+  console.log(`🔑 Code: ${resetCode}`);  // ✅ سيظهر في Vercel Logs
+
   user.resetCode = resetCode;
   user.resetCodeExpiry = new Date(Date.now() + 15 * 60 * 1000);
-  user.lastResetRequest = new Date();
   await this.usersRepository.save(user);
 
-  // ✅ طباعة الرمز في السجلات (يظهر دائماً)
-  this.logger.log(`🔑 Reset code for ${email}: ${resetCode}`);
-
-  // محاولة إرسال البريد
+  // إرسال البريد
   try {
     await this.mailerService.sendMail({
       to: email,
-      subject: '🔐 إعادة تعيين كلمة المرور - نظام التحويلات',
-      html: `
-        <div dir="rtl" style="font-family: Arial; padding: 20px;">
-          <h2>إعادة تعيين كلمة المرور</h2>
-          <p>مرحباً ${user.username}،</p>
-          <p>رمز إعادة التعيين الخاص بك هو:</p>
-          <h1 style="color: #6C63FF; letter-spacing: 5px; font-size: 36px;">${resetCode}</h1>
-          <p>هذا الرمز صالح لمدة 15 دقيقة.</p>
-        </div>
-      `,
+      subject: '🔐 إعادة تعيين كلمة المرور',
+      html: `<h2>رمز إعادة التعيين: <b>${resetCode}</b></h2>`,
     });
-    this.logger.log(`✅ Email sent successfully to ${email}`);
+    console.log(`✅ Email sent to ${email}`);
   } catch (error) {
-    this.logger.error(`❌ Email failed: ${error.message}`);
+    console.log(`❌ Email failed: ${error.message}`);
   }
 
   return { message: 'إذا كان البريد مسجلاً، سيصلك رمز إعادة التعيين' };
