@@ -88,47 +88,62 @@ export class AuthService {
   }
 
   // ========== نسيت كلمة المرور ==========
-
-  async forgotPassword(email: string): Promise<{ message: string }> {
-    const user = await this.usersRepository.findOne({ where: { email } });
-    const response = { message: 'إذا كان البريد مسجلاً، سيصلك رمز إعادة التعيين' };
-    if (!user) return response;
-
-    // منع الطلبات المتكررة
-    if (user.lastResetRequest) {
-      const diff = Date.now() - new Date(user.lastResetRequest).getTime();
-      if (diff < 60000) return { message: 'يرجى الانتظار دقيقة قبل طلب رمز جديد' };
-    }
-
-    if (user.resetAttempts >= 5) {
-      const lastAttempt = new Date(user.lastResetRequest || 0);
-      if (Date.now() - lastAttempt.getTime() < 3600000) return { message: 'تجاوزت الحد الأقصى. حاول بعد ساعة' };
-      user.resetAttempts = 0;
-    }
-
-    const resetCode = randomInt(100000, 999999).toString();
-    user.resetCode = resetCode;
-    user.resetCodeExpiry = new Date(Date.now() + 15 * 60 * 1000);
-    user.resetAttempts = (user.resetAttempts || 0) + 1;
-    user.lastResetRequest = new Date();
-    await this.usersRepository.save(user);
-
-    // إرسال البريد
-    try {
-      await this.mailerService.sendMail({
-        to: email,
-        subject: '🔐 إعادة تعيين كلمة المرور - نظام التحويلات',
-        template: 'reset-password',
-        context: { username: user.username, code: resetCode, year: new Date().getFullYear() },
-      });
-      this.logger.log(`✅ Reset code sent to ${email}`);
-    } catch (error) {
-      this.logger.error(`❌ Email failed: ${error.message}`);
-    }
-
-    return response;
+// ✅ طلب إعادة تعيين كلمة المرور
+async forgotPassword(email: string): Promise<{ message: string }> {
+  // ✅ سيظهر في سجلات Vercel فوراً
+  this.logger.log(`🔵 forgotPassword called with email: ${email}`);
+  
+  const user = await this.usersRepository.findOne({ where: { email } });
+  
+  if (!user) {
+    this.logger.warn(`🟡 User not found for email: ${email}`);
+    return { message: 'إذا كان البريد مسجلاً، سيصلك رمز إعادة التعيين' };
   }
 
+  this.logger.log(`🟢 User found: ${user.username}`);
+
+  // منع الطلبات المتكررة
+  if (user.lastResetRequest) {
+    const diff = Date.now() - new Date(user.lastResetRequest).getTime();
+    if (diff < 60000) {
+      this.logger.warn(`🟠 Too many requests for ${email}`);
+      return { message: 'يرجى الانتظار دقيقة قبل طلب رمز جديد' };
+    }
+  }
+
+  // إنشاء رمز 6 أرقام
+  const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
+  
+  user.resetCode = resetCode;
+  user.resetCodeExpiry = new Date(Date.now() + 15 * 60 * 1000);
+  user.lastResetRequest = new Date();
+  await this.usersRepository.save(user);
+
+  // ✅ طباعة الرمز في السجلات (يظهر دائماً)
+  this.logger.log(`🔑 Reset code for ${email}: ${resetCode}`);
+
+  // محاولة إرسال البريد
+  try {
+    await this.mailerService.sendMail({
+      to: email,
+      subject: '🔐 إعادة تعيين كلمة المرور - نظام التحويلات',
+      html: `
+        <div dir="rtl" style="font-family: Arial; padding: 20px;">
+          <h2>إعادة تعيين كلمة المرور</h2>
+          <p>مرحباً ${user.username}،</p>
+          <p>رمز إعادة التعيين الخاص بك هو:</p>
+          <h1 style="color: #6C63FF; letter-spacing: 5px; font-size: 36px;">${resetCode}</h1>
+          <p>هذا الرمز صالح لمدة 15 دقيقة.</p>
+        </div>
+      `,
+    });
+    this.logger.log(`✅ Email sent successfully to ${email}`);
+  } catch (error) {
+    this.logger.error(`❌ Email failed: ${error.message}`);
+  }
+
+  return { message: 'إذا كان البريد مسجلاً، سيصلك رمز إعادة التعيين' };
+}
   async resetPassword(email: string, code: string, newPassword: string): Promise<{ message: string }> {
     const user = await this.usersRepository.findOne({ where: { email } });
     if (!user || !user.resetCode) throw new BadRequestException('رمز إعادة التعيين غير صالح');
