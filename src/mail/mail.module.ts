@@ -1,32 +1,29 @@
+// app.module.ts
 import { Module } from '@nestjs/common';
-import { MailerModule } from '@nestjs-modules/mailer';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { MailService } from './mail.service';
-import { MailController } from './mail.controller';
+import { MailerModule } from '@nestjs-modules/mailer';
 
 @Module({
   imports: [
+    ConfigModule.forRoot({ isGlobal: true }),
     MailerModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
+      useFactory: async (configService: ConfigService) => ({
         transport: {
-          host: config.get('MAIL_HOST'),
-          port: config.get('MAIL_PORT'),
-          secure: false,
+          host: configService.get<string>('MAIL_HOST'),
+          port: configService.get<number>('MAIL_PORT'),
+          secure: configService.get<boolean>('MAIL_SECURE'), // false لـ 587
           auth: {
-            user: config.get('MAIL_USER'),
-            pass: config.get('MAIL_PASSWORD'),
+            user: configService.get<string>('MAIL_USER'),
+            pass: configService.get<string>('MAIL_PASSWORD'), // كلمة مرور التطبيق
           },
         },
         defaults: {
-          from: `"Platform" <${config.get('MAIL_FROM')}>`,
+          from: configService.get<string>('MAIL_FROM'),
         },
       }),
     }),
   ],
-  controllers: [MailController],
-  providers: [MailService],
-  exports: [MailService],
 })
-export class MailModule {}
+export class AppModule {}
