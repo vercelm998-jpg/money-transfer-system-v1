@@ -5,6 +5,7 @@ import {
   BadRequestException,
   Logger
 } from '@nestjs/common';
+import { Resend } from 'resend';
 import { MailerService } from '@nestjs-modules/mailer';
 import { randomInt } from 'crypto';
 import { JwtService } from '@nestjs/jwt';
@@ -86,40 +87,61 @@ export class AuthService {
     await this.auditService.logAction(userId, 'CHANGE_PASSWORD', 'تغيير كلمة المرور');
     return { message: 'تم تغيير كلمة المرور بنجاح' };
   }
-
   // ========== نسيت كلمة المرور ==========
 async forgotPassword(email: string): Promise<{ message: string }> {
-  console.log(`🔵 forgotPassword called: ${email}`);  // ✅ أضف هذا
-  this.logger.log(`🔵 forgotPassword called with email: ${email}`);
+  console.log('🔵 forgotPassword:', email);
   
   const user = await this.usersRepository.findOne({ where: { email } });
-  console.log(`🟢 user exists: ${!!user}`);  // ✅ أضف هذا
   
   if (!user) {
-    console.log(`🟡 no user for: ${email}`);
+    console.log('🟡 User not found');
     return { message: 'إذا كان البريد مسجلاً، سيصلك رمز إعادة التعيين' };
   }
 
-  console.log(`🟢 User found: ${user.username}`);
-  const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
-  console.log(`🔑 Code: ${resetCode}`);  // ✅ سيظهر في Vercel Logs
+  console.log('🟢 User found:', user.username);
 
-  user.resetCode = resetCode;
-  user.resetCodeExpiry = new Date(Date.now() + 15 * 60 * 1000);
-  await this.usersRepository.save(user);
-
-  // إرسال البريد
-  try {
-    await this.mailerService.sendMail({
-      to: email,
-      subject: '🔐 إعادة تعيين كلمة المرور',
-      html: `<h2>رمز إعادة التعيين: <b>${resetCode}</b></h2>`,
-    });
-    console.log(`✅ Email sent to ${email}`);
-  } catch (error) {
-    console.log(`❌ Email failed: ${error.message}`);
+  // منع الطلبات المتكررة
+  if (user.lastResetRequest) {
+    const diff = Date.now() - new Date(user.lastResetRequest).getTime();
+    if (diff < 60000) {
+      return { message: 'يرجى الانتظار دقيقة قبل طلب رمز جديد' };
+    }
   }
 
+  // إنشاء رمز
+  const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
+  
+  user.resetCode = resetCode;
+  user.resetCodeExpiry = new Date(Date.now() + 15 * 60 * 1000);
+  user.lastResetRequest = new Date();
+  await this.usersRepository.save(user);
+
+  console.log('🔑 Reset code:', resetCode);
+
+  // ✅ إرسال عبر Resend
+  try {
+    const resend = new Resend(process.env.RESEND_API_KEY);
+    
+    await resend.emails.send({
+      from: 'نظام التحويلات <onboarding@resend.dev>',
+      to: [email],
+      subject: '🔐 رمز إعادة تعيين كلمة المرور',
+      html: `
+        <div dir="rtl" style="font-family: Arial; padding: 20px;">
+          <h2>إعادة تعيين كلمة المرور</h2>
+          <p>مرحباً ${user.username}،</p>
+          <p>رمز إعادة التعيين الخاص بك هو:</p>
+          <h1 style="color: #6C63FF; letter-spacing: 5px; font-size: 36px;">${resetCode}</h1>
+          <p>هذا الرمز صالح لمدة 15 دقيقة.</p>
+        </div>
+      `,
+    });
+    
+    console.log('✅ Resend email sent to:', email);
+  } catch (error) {
+    const err = error as any;
+    console.log('❌ Resend error:', err?.message || err);
+}
   return { message: 'إذا كان البريد مسجلاً، سيصلك رمز إعادة التعيين' };
 }
   async resetPassword(email: string, code: string, newPassword: string): Promise<{ message: string }> {
