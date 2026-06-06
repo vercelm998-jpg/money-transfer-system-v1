@@ -33,7 +33,6 @@ async function bootstrapServer() {
       message: '🚀 نظام التحويلات API يعمل بنجاح',
       version: '1.0.0',
       status: 'online'
-      },
     });
   });
 
