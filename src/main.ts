@@ -32,18 +32,7 @@ async function bootstrapServer() {
     res.json({
       message: '🚀 نظام التحويلات API يعمل بنجاح',
       version: '1.0.0',
-      status: 'online',
-      docs: '/api/docs',
-      endpoints: {
-        auth: {
-          login: '/api/v1/auth/login',
-          register: '/api/v1/auth/register',
-        },
-        users: '/api/v1/users',
-        transfers: '/api/v1/transfers',
-        wallet: '/api/v1/wallet',
-        notifications: '/api/v1/notifications',
-        reports: '/api/v1/reports',
+      status: 'online'
       },
     });
   });
@@ -73,7 +62,6 @@ if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
 
     const port = process.env.PORT || 3000;
     await app.listen(port);
-    Logger.log(`🚀 Server running on http://localhost:${port}`);
   }
   bootstrap();
 }
