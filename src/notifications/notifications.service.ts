@@ -11,17 +11,132 @@ import { Notification, NotificationType, NotificationPriority } from './notifica
 import { CreateNotificationDto, NotificationQueryDto } from './dto/create-notification.dto';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { NotificationsGateway } from './notifications.gateway';
+import { Expo, ExpoPushMessage } from 'expo-server-sdk';
+
+// استيراد Entity الـ Push Token (سننشئه لاحقاً)
+import { UserPushToken } from './user-push-token.entity';
 
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
+  private expo: Expo;
 
   constructor(
     @InjectRepository(Notification)
     private notificationsRepository: Repository<Notification>,
+    @InjectRepository(UserPushToken)
+    private pushTokenRepository: Repository<UserPushToken>,
     private gateway: NotificationsGateway,
-  ) {}
+  ) {
+    // تهيئة Expo SDK
+    this.expo = new Expo();
+  }
 
+  /**
+   * إرسال إشعار عبر Expo Push API (يعمل حتى لو التطبيق مغلق)
+   */
+  async sendExpoPushNotification(
+    expoPushToken: string,
+    title: string,
+    body: string,
+    data?: Record<string, any>
+  ): Promise<boolean> {
+    // التحقق من صحة الـ Token
+    if (!Expo.isExpoPushToken(expoPushToken)) {
+      this.logger.warn(`⚠️ Invalid Expo push token: ${expoPushToken}`);
+      return false;
+    }
+
+    const message: ExpoPushMessage = {
+      to: expoPushToken,
+      sound: 'default',
+      title: title,
+      body: body,
+      data: data || {},
+      priority: 'high', // مهم لضمان الوصول عند إغلاق التطبيق
+    };
+
+    try {
+      const chunks = this.expo.chunkPushNotifications([message]);
+      const tickets = [];
+      
+      for (const chunk of chunks) {
+        const ticketChunk = await this.expo.sendPushNotificationsAsync(chunk);
+        tickets.push(...ticketChunk);
+      }
+      
+      // التحقق من وجود أخطاء في الـ tickets
+      for (const ticket of tickets) {
+        if (ticket.status === 'error') {
+          this.logger.error(`❌ Expo push error: ${ticket.message}`);
+          if (ticket.details?.error === 'DeviceNotRegistered') {
+            // إذا كان الجهاز غير مسجل، نقوم بتعطيل الـ token
+            await this.pushTokenRepository.update(
+              { token: expoPushToken, isActive: true },
+              { isActive: false }
+            );
+          }
+          return false;
+        }
+      }
+      
+      this.logger.log(`📱 Expo push sent successfully for token: ${expoPushToken.substring(0, 20)}...`);
+      return true;
+    } catch (error) {
+      this.logger.error(`❌ Expo push failed: ${error.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * تسجيل جهاز المستخدم لاستقبال الإشعارات
+   */
+  async registerPushToken(
+    userId: number, 
+    token: string, 
+    deviceName?: string
+  ): Promise<UserPushToken> {
+    // التحقق من صحة الـ token
+    if (!Expo.isExpoPushToken(token)) {
+      throw new BadRequestException('Invalid Expo push token');
+    }
+
+    // تعطيل أي token قديم للمستخدم
+    await this.pushTokenRepository.update(
+      { userId, isActive: true },
+      { isActive: false }
+    );
+    
+    // حفظ الـ token الجديد
+    const pushToken = this.pushTokenRepository.create({
+      userId,
+      token,
+      deviceName: deviceName || 'Unknown Device',
+      isActive: true,
+      type: 'expo'
+    });
+    
+    const savedToken = await this.pushTokenRepository.save(pushToken);
+    this.logger.log(`📱 Push token registered for user ${userId}`);
+    
+    return savedToken;
+  }
+
+  /**
+   * الحصول على الـ Push Token النشط لمستخدم
+   */
+  async getUserActivePushToken(userId: number): Promise<string | null> {
+    const pushToken = await this.pushTokenRepository.findOne({
+      where: { userId, isActive: true },
+      order: { createdAt: 'DESC' }
+    });
+    
+    return pushToken?.token || null;
+  }
+
+  /**
+   * إنشاء إشعار جديد (معدل لدعم Expo Push)
+   */
   async createNotification(data: {
     userId: number;
     title: string;
@@ -31,6 +146,8 @@ export class NotificationsService {
     priority?: string;
     actionUrl?: string;
     metadata?: Record<string, any>;
+    expoPushToken?: string; // يمكن تمرير token مباشرة
+    skipExpoPush?: boolean; // لتخطي إرسال Expo Push في بعض الحالات
   }): Promise<Notification> {
     try {
       const notification = this.notificationsRepository.create({
@@ -48,8 +165,34 @@ export class NotificationsService {
       
       this.logger.log(`✅ تم إنشاء إشعار للمستخدم ${data.userId}: ${data.title}`);
 
-      // ✅ إرسال فوري عبر WebSocket
+      // ✅ إرسال فوري عبر WebSocket (للتطبيق المفتوح)
       this.gateway.sendNotificationToUser(data.userId, savedNotification);
+      
+      // ✅ إرسال عبر Expo Push (للتطبيق المغلق)
+      if (!data.skipExpoPush) {
+        let pushToken = data.expoPushToken;
+        
+        // إذا لم يتم تمرير token، نحاول الحصول عليه من قاعدة البيانات
+        if (!pushToken) {
+          pushToken = await this.getUserActivePushToken(data.userId);
+        }
+        
+        if (pushToken) {
+          await this.sendExpoPushNotification(
+            pushToken,
+            data.title,
+            data.message,
+            {
+              notificationId: savedNotification.id,
+              type: data.type,
+              transferId: data.transferId,
+              screen: data.actionUrl || 'notifications',
+            }
+          );
+        } else {
+          this.logger.warn(`⚠️ No active push token for user ${data.userId}, skipping Expo push`);
+        }
+      }
       
       return savedNotification;
     } catch (error) {
@@ -188,6 +331,9 @@ export class NotificationsService {
     if (result.affected > 0) this.logger.log(`⏰ تم حذف ${result.affected} إشعار منتهي`);
   }
 
+  /**
+   * إرسال إشعارات جماعية (معدل لدعم Expo Push)
+   */
   async sendBulkNotifications(
     userIds: number[],
     title: string,
@@ -197,15 +343,27 @@ export class NotificationsService {
   ): Promise<{ sent: number; failed: number }> {
     let sent = 0;
     let failed = 0;
+    
     for (const userId of userIds) {
       try {
-        await this.createNotification({ userId, title, message, type, priority: priority || 'medium' as NotificationPriority });
+        // الحصول على الـ Expo Push Token النشط للمستخدم
+        const pushToken = await this.getUserActivePushToken(userId);
+        
+        await this.createNotification({ 
+          userId, 
+          title, 
+          message, 
+          type, 
+          priority: priority || NotificationPriority.MEDIUM,
+          expoPushToken: pushToken || undefined
+        });
         sent++;
       } catch (error) {
         this.logger.error(`فشل إرسال الإشعار للمستخدم ${userId}: ${error.message}`);
         failed++;
       }
     }
+    
     return { sent, failed };
   }
-}
+                                                               }
