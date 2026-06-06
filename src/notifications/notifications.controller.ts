@@ -84,6 +84,23 @@ export class NotificationsController {
     return { message: 'تم حذف الإشعار بنجاح' };
   }
 
+  @Post('register-token')
+  @ApiOperation({ summary: 'تسجيل جهاز المستخدم لاستقبال الإشعارات' })
+  async registerPushToken(
+    @CurrentUser() user: any,
+    @Body() body: { token: string; deviceName?: string }
+  ) {
+    // ✅ تم التصحيح: changed devName to deviceName
+    return this.notificationsService.registerPushToken(user.id, body.token, body.deviceName);
+  }
+
+  @Get('push-token')
+  @ApiOperation({ summary: 'الحصول على الـ Push Token النشط للمستخدم' })
+  async getActivePushToken(@CurrentUser() user: any) {
+    const token = await this.notificationsService.getUserActivePushToken(user.id);
+    return { token };
+  }
+
   @Delete()
   @ApiOperation({ summary: 'حذف جميع الإشعارات' })
   @HttpCode(HttpStatus.OK)
@@ -122,4 +139,4 @@ export class NotificationsController {
       body.priority as any
     );
   }
-}
+    }
